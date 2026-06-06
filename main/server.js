@@ -102,7 +102,7 @@ try {
 }
 
 try {
-  arduino2 = new SerialPort({ path: '/dev/ttyUSB0', baudRate: 9600 });
+  arduino2 = new SerialPort({ path: '/dev/ttyACM1', baudRate: 9600 });
   arduino2.on('error', function(err) {
     console.log('Arduino 2 Error: ', err.message);
   });
