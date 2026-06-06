@@ -1,5 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Lock, Unlock, Lightbulb, Wind, Fingerprint, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2 } from 'lucide-react';
+import io from 'socket.io-client';
+import axios from 'axios';
+
+const raspberryIp = window.location.hostname;
+const socket = io(`http://${raspberryIp}:3001`);
 
 // --- 애니메이션을 위한 글로벌 스타일 (쓰레기통 출렁임 효과) ---
 const GlobalStyles = () => (
@@ -299,25 +304,19 @@ const IndoorClimateCard = ({ raspberryIp }) => {
   const [climate, setClimate] = useState({ temp: 24, hum: 45 });
 
   useEffect(() => {
-    const fetchClimate = async () => {
-      try {
-        const response = await fetch(`http://${raspberryIp}:5000/api/climate`);
-        const data = await response.json();
-        if (data && data.temperature !== undefined && data.humidity !== undefined) {
-          setClimate({ 
-            temp: Math.round(data.temperature), 
-            hum: Math.round(data.humidity) 
-          });
-        }
-      } catch (error) {
-        console.error("온습도 데이터 갱신 실패", error);
+    const handleSensorData = (data) => {
+      if (data.type === 'dht11') {
+        setClimate({ 
+          temp: Math.round(data.temperature), 
+          hum: Math.round(data.humidity) 
+        });
       }
     };
-    
-    fetchClimate();
-    const interval = setInterval(fetchClimate, 2000); 
-    return () => clearInterval(interval);
-  }, [raspberryIp]);
+    socket.on('sensorData', handleSensorData);
+    return () => {
+      socket.off('sensorData', handleSensorData);
+    };
+  }, []);
 
   const isGood = climate.temp < 28 && climate.hum < 60;
 
@@ -352,32 +351,25 @@ const TrashBinCard = ({ raspberryIp }) => {
   const [fillLevel, setFillLevel] = useState(0);
 
   useEffect(() => {
-    const fetchTrashLevel = async () => {
-      try {
-        const response = await fetch(`http://${raspberryIp}:5000/api/trash-level`);
-        const data = await response.json();
-        if (data && data.level !== undefined) {
-          setFillLevel(data.level);
-        }
-      } catch (error) {
-        console.error("데이터 갱신 실패", error);
+    const handleSensorData = (data) => {
+      if (data.type === 'ultrasonic') {
+        // Map max distance 30cm to 0%, 5cm to 100%
+        let percent = Math.round(((30 - data.distance) / 25) * 100);
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        setFillLevel(percent);
       }
     };
-    fetchTrashLevel();
-    const interval = setInterval(fetchTrashLevel, 100); // 1초마다 실시간 갱신
-    return () => clearInterval(interval);
-  }, [raspberryIp]);
+    socket.on('sensorData', handleSensorData);
+    return () => {
+      socket.off('sensorData', handleSensorData);
+    };
+  }, []);
 
   const isFull = fillLevel > 80;
 
   return (
-    <div className="apple-widget relative rounded-[32px] overflow-hidden transition-all duration-500 h-48 cursor-pointer hover:bg-white/90" onClick={async () => {
-      try {
-        const response = await fetch(`http://${raspberryIp}:5000/api/trash-level`);
-        const data = await response.json();
-        if (data && data.level !== undefined) setFillLevel(data.level);
-      } catch (e) {}
-    }}>
+    <div className="apple-widget relative rounded-[32px] overflow-hidden transition-all duration-500 h-48 hover:bg-white/90">
       <div className="absolute bottom-0 left-0 w-full transition-all duration-1000 ease-in-out z-0 rounded-b-[32px]" style={{ height: `${fillLevel}%` }}>
         <svg className="absolute bottom-full left-0 w-[200%] h-[24px] z-0 opacity-80" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none">
           <path d="M0,40 C150,80 350,0 600,40 C850,80 1050,0 1200,40 L1200,120 L0,120 Z" className={isFull ? "fill-red-200" : "fill-indigo-200"} style={{ animation: 'wave-slide 3s linear infinite' }}></path>
@@ -400,75 +392,127 @@ const TrashBinCard = ({ raspberryIp }) => {
 };
 
 // --- 전력 사용량 위젯 ---
-const PowerUsageCard = () => (
-  <div className="col-span-2 w-full relative rounded-[32px] overflow-hidden apple-widget p-7 flex flex-col transition-all duration-500 hover:bg-white/90">
-    <div className="flex items-center gap-3 mb-6">
-      <div className="p-3.5 rounded-full bg-green-500 text-white shadow-md"><Zap size={22} strokeWidth={2.5} /></div>
-      <div>
-        <h3 className="text-2xl font-bold tracking-tight text-gray-900">전력 사용량</h3>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-green-500">실시간 모니터링</p>
+const PowerUsageCard = () => {
+  const [powerData, setPowerData] = useState({ currentPowerW: 0, accumulatedKWh: 0, estimatedBill: 0 });
+
+  useEffect(() => {
+    const fetchPowerData = async () => {
+      try {
+        const response = await axios.get(`http://${raspberryIp}:3001/api/power`);
+        setPowerData(response.data);
+      } catch (error) {
+        console.error("전력 데이터 갱신 실패", error);
+      }
+    };
+    fetchPowerData();
+    const interval = setInterval(fetchPowerData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="col-span-2 w-full relative rounded-[32px] overflow-hidden apple-widget p-7 flex flex-col transition-all duration-500 hover:bg-white/90">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-3.5 rounded-full bg-green-500 text-white shadow-md"><Zap size={22} strokeWidth={2.5} /></div>
+        <div>
+          <h3 className="text-2xl font-bold tracking-tight text-gray-900">전력 사용량</h3>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-green-500">실시간 모니터링</p>
+          </div>
         </div>
       </div>
+      <div className="grid grid-cols-3 gap-4">
+        {[ 
+          { label: "현재 사용량", val: powerData.currentPowerW, unit: "W", icon: Activity }, 
+          { label: "이달 누적량", val: powerData.accumulatedKWh, unit: "kWh", icon: Zap }, 
+          { label: "예상 청구 금액", val: powerData.estimatedBill.toLocaleString(), unit: "₩", icon: CreditCard, isPre: true } 
+        ].map((item, idx) => (
+          <div key={idx} className="bg-gray-50/70 rounded-2xl p-4 border border-gray-100 flex flex-col justify-between">
+            <div className="flex items-center gap-1.5 text-gray-400 mb-2"><item.icon size={14} strokeWidth={2.5} /><span className="text-[10px] font-bold uppercase tracking-wider">{item.label}</span></div>
+            <div className="flex items-baseline gap-1">{item.isPre && <span className="text-sm font-semibold text-gray-500 mr-0.5">{item.unit}</span>}<span className="text-3xl font-bold text-gray-900 tracking-tighter">{item.val}</span>{!item.isPre && <span className="text-sm font-semibold text-gray-500">{item.unit}</span>}</div>
+          </div>
+        ))}
+      </div>
     </div>
-    <div className="grid grid-cols-3 gap-4">
-      {[ { label: "현재 사용량", val: 420, unit: "W", icon: Activity }, { label: "이달 누적량", val: 184, unit: "kWh", icon: Zap }, { label: "예상 청구 금액", val: "28,500", unit: "₩", icon: CreditCard, isPre: true } ].map((item, idx) => (
-        <div key={idx} className="bg-gray-50/70 rounded-2xl p-4 border border-gray-100 flex flex-col justify-between">
-          <div className="flex items-center gap-1.5 text-gray-400 mb-2"><item.icon size={14} strokeWidth={2.5} /><span className="text-[10px] font-bold uppercase tracking-wider">{item.label}</span></div>
-          <div className="flex items-baseline gap-1">{item.isPre && <span className="text-sm font-semibold text-gray-500 mr-0.5">{item.unit}</span>}<span className="text-3xl font-bold text-gray-900 tracking-tighter">{item.val}</span>{!item.isPre && <span className="text-sm font-semibold text-gray-500">{item.unit}</span>}</div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 // --- 메인 앱 컴포넌트 ---
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
   const [doorLogs, setDoorLogs] = useState(["09:00 - 문이 잠겼습니다."]);
-  const raspberryIp = "172.30.1.27"; // 라즈베리파이 IP 고정
 
-  const handleDoorToggle = async () => {
-    // 1. UI 즉시 업데이트 (사용자 경험 개선)
+  const handleDoorToggle = () => {
     const nextLockedState = !isLocked;
-    const prevLockedState = isLocked;
     setIsLocked(nextLockedState);
-
-    const targetPath = prevLockedState ? 'unlock' : 'lock';
-
-    try {
-      // 2. 서버에 요청 (응답을 기다리지만 UI는 이미 바뀜)
-      const response = await fetch(`http://${raspberryIp}:5000/api/door/${targetPath}`, {
-        method: 'POST',
-      });
-
-      if (response.ok) {
-        // 성공 시 로그 기록
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-        const newLog = nextLockedState 
-          ? `${timeStr} - 문이 잠겼습니다.` 
-          : `${timeStr} - 사용자가 문을 열었습니다.`;
-        setDoorLogs(prev => [newLog, ...prev]);
-      } else {
-        // 서버 에러 발생 시 원래 상태로 복구
-        setIsLocked(prevLockedState);
-        console.error("서버 응답 에러:", response.status);
-      }
-    } catch (error) {
-      // 네트워크 연결 실패 시 원래 상태로 복구
-      setIsLocked(prevLockedState);
-      console.error("연결 실패:", error);
-      alert("라즈베리파이 서버와 연결할 수 없습니다.");
-    }
+    socket.emit('toggleDoor');
+    
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const newLog = nextLockedState 
+      ? `${timeStr} - 문이 잠겼습니다.` 
+      : `${timeStr} - 사용자가 문을 열었습니다.`;
+    setDoorLogs(prev => [newLog, ...prev]);
   };
 
   const [isLightOn, setIsLightOn] = useState(false);
-  const [lightSwitches, setLightSwitches] = useState({ s1: true, s2: false });
+  const [lightSwitches, setLightSwitches] = useState({ s1: false, s2: false });
+
+  const handleTogglePower = () => {
+    const newState = !isLightOn;
+    setIsLightOn(newState);
+    
+    if (!newState) {
+       socket.emit('setLight', { id: 1, status: 'OFF' });
+       socket.emit('setLight', { id: 2, status: 'OFF' });
+    } else {
+       if (lightSwitches.s1) socket.emit('setLight', { id: 1, status: 'ON' });
+       if (lightSwitches.s2) socket.emit('setLight', { id: 2, status: 'ON' });
+       if (!lightSwitches.s1 && !lightSwitches.s2) {
+         setLightSwitches({ s1: true, s2: true });
+         socket.emit('setLight', { id: 1, status: 'ON' });
+         socket.emit('setLight', { id: 2, status: 'ON' });
+       }
+    }
+  };
+
+  const handleToggleSwitch = (id) => {
+    setLightSwitches(prev => {
+      const newState = { ...prev, [id]: !prev[id] };
+      if (isLightOn) {
+        socket.emit('setLight', { id: id === 's1' ? 1 : 2, status: newState[id] ? 'ON' : 'OFF' });
+      }
+      return newState;
+    });
+  };
+
   const [acPower, setAcPower] = useState(false);
   const [acMode, setAcMode] = useState('cool');
   const [acTemp, setAcTemp] = useState(24);
+
+  const handleAcPower = () => {
+    const newState = !acPower;
+    setAcPower(newState);
+    if (newState) {
+      socket.emit('setAC', { command: `AC_POWER_ON_${acMode.toUpperCase()}_${acTemp}`, rawStatus: 'ON' });
+    } else {
+      socket.emit('setAC', { command: 'AC_POWER_OFF', rawStatus: 'OFF' });
+    }
+  };
+
+  const handleAcMode = (mode) => {
+    setAcMode(mode);
+    if (acPower) {
+      socket.emit('setAC', { command: `AC_${mode.toUpperCase()}_${acTemp}`, rawStatus: 'ON' });
+    }
+  };
+
+  const handleAcTemp = (temp) => {
+    setAcTemp(temp);
+    if (acPower) {
+      socket.emit('setAC', { command: `AC_${acMode.toUpperCase()}_${temp}`, rawStatus: 'ON' });
+    }
+  };
 
   return (
     <>
@@ -485,10 +529,9 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-5 items-start">
             <DoorLockCard isLocked={isLocked} onClick={handleDoorToggle} logs={doorLogs} />
-            <LightCard isOn={isLightOn} switches={lightSwitches} onTogglePower={() => setIsLightOn(!isLightOn)} onToggleSwitch={(id) => setLightSwitches(p => ({...p, [id]: !p[id]}))} />
-            <AcRemoteCard isOn={acPower} onTogglePower={() => setAcPower(!acPower)} mode={acMode} onToggleMode={setAcMode} temp={acTemp} onTempChange={setAcTemp} />
+            <LightCard isOn={isLightOn} switches={lightSwitches} onTogglePower={handleTogglePower} onToggleSwitch={handleToggleSwitch} />
+            <AcRemoteCard isOn={acPower} onTogglePower={handleAcPower} mode={acMode} onToggleMode={handleAcMode} temp={acTemp} onTempChange={handleAcTemp} />
             
-            {/* 온습도 카드에 API 연동을 위해 IP 전달 */}
             <IndoorClimateCard raspberryIp={raspberryIp} />
             
             <TrashBinCard raspberryIp={raspberryIp} />
