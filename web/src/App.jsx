@@ -26,13 +26,17 @@ const GlobalStyles = () => (
   `}</style>
 );
 
-// --- 상단 헤더용: 박스 없이 아이콘과 상태등만 남긴 지문 인식 위젯 ---
-const BiometricsWidget = () => (
+// --- 상단 헤더용: 쓰레기통 수위 초기화 위젯 ---
+const TrashResetWidget = ({ onReset }) => (
   <div className="flex items-center justify-center mr-2">
-    <div className="relative text-indigo-500 opacity-90 drop-shadow-sm">
-      <Fingerprint size={28} strokeWidth={2.5} />
-      <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-green-500 border-2 border-[#EBF0F5] shadow-sm" />
-    </div>
+    <button 
+      onClick={onReset}
+      className="relative text-indigo-500 opacity-90 drop-shadow-sm hover:scale-110 transition-transform p-1"
+      title="쓰레기통 수위 초기화"
+    >
+      <Trash2 size={28} strokeWidth={2.5} />
+      <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-indigo-500 border-2 border-[#EBF0F5] shadow-sm" />
+    </button>
   </div>
 );
 
@@ -300,7 +304,7 @@ const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempCha
 };
 
 // --- 실내 온/습도 위젯 (API 연동 적용) ---
-const IndoorClimateCard = ({ raspberryIp }) => {
+const IndoorClimateCard = () => {
   const [climate, setClimate] = useState({ temp: 24, hum: 45 });
 
   useEffect(() => {
@@ -347,30 +351,22 @@ const IndoorClimateCard = ({ raspberryIp }) => {
 };
 
 // --- 쓰레기통 수위 위젯 (API 연동) ---
-const TrashBinCard = ({ raspberryIp }) => {
-  const [fillLevel, setFillLevel] = useState(0);
+const TrashBinCard = ({ currentDistance, baseDistance }) => {
+  // 포화도 계산 로직 개선
+  let percent = 0;
+  if (baseDistance > 0) {
+    // (기본 거리 - 현재 거리) / 기본 거리 * 100
+    // 예: 기본 80cm, 현재 20cm -> (80-20)/80 = 75%
+    percent = Math.round(((baseDistance - currentDistance) / baseDistance) * 100);
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+  }
 
-  useEffect(() => {
-    const handleSensorData = (data) => {
-      if (data.type === 'ultrasonic') {
-        // Map max distance 30cm to 0%, 5cm to 100%
-        let percent = Math.round(((30 - data.distance) / 25) * 100);
-        if (percent < 0) percent = 0;
-        if (percent > 100) percent = 100;
-        setFillLevel(percent);
-      }
-    };
-    socket.on('sensorData', handleSensorData);
-    return () => {
-      socket.off('sensorData', handleSensorData);
-    };
-  }, []);
-
-  const isFull = fillLevel > 80;
+  const isFull = percent > 80;
 
   return (
     <div className="apple-widget relative rounded-[32px] overflow-hidden transition-all duration-500 h-48 hover:bg-white/90">
-      <div className="absolute bottom-0 left-0 w-full transition-all duration-1000 ease-in-out z-0 rounded-b-[32px]" style={{ height: `${fillLevel}%` }}>
+      <div className="absolute bottom-0 left-0 w-full transition-all duration-1000 ease-in-out z-0 rounded-b-[32px]" style={{ height: `${percent}%` }}>
         <svg className="absolute bottom-full left-0 w-[200%] h-[24px] z-0 opacity-80" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none">
           <path d="M0,40 C150,80 350,0 600,40 C850,80 1050,0 1200,40 L1200,120 L0,120 Z" className={isFull ? "fill-red-200" : "fill-indigo-200"} style={{ animation: 'wave-slide 3s linear infinite' }}></path>
           <path d="M0,60 C200,20 400,100 600,60 C800,20 1000,100 1200,60 L1200,120 L0,120 Z" className={isFull ? "fill-red-300" : "fill-indigo-300"} style={{ animation: 'wave-slide 4s linear infinite reverse' }}></path>
@@ -383,7 +379,7 @@ const TrashBinCard = ({ raspberryIp }) => {
           <div className={`px-3 py-1 rounded-full backdrop-blur-md border border-white/50 shadow-sm text-[10px] font-black uppercase tracking-wider transition-colors duration-500 ${isFull ? 'bg-red-50 text-red-500' : 'bg-white/80 text-indigo-500'}`}>{isFull ? '가득 참' : '여유'}</div>
         </div>
         <div className="mt-auto space-y-0.5">
-          <div className="flex items-baseline gap-1"><span className="text-4xl font-bold text-gray-900 tracking-tighter">{fillLevel}</span><span className="text-lg font-bold text-gray-500">%</span></div>
+          <div className="flex items-baseline gap-1"><span className="text-4xl font-bold text-gray-900 tracking-tighter">{percent}</span><span className="text-lg font-bold text-gray-500">%</span></div>
           <h3 className="text-sm font-bold tracking-tight text-gray-600">쓰레기통 포화도</h3>
         </div>
       </div>
@@ -441,6 +437,25 @@ const PowerUsageCard = () => {
 export default function App() {
   const [isLocked, setIsLocked] = useState(true);
   const [doorLogs, setDoorLogs] = useState(["09:00 - 문이 잠겼습니다."]);
+
+  // Trash Bin State
+  const [currentTrashDist, setCurrentTrashDist] = useState(30);
+  const [baseTrashDist, setBaseTrashDist] = useState(30);
+
+  useEffect(() => {
+    const handleSensorData = (data) => {
+      if (data.type === 'ultrasonic') {
+        setCurrentTrashDist(data.distance);
+      }
+    };
+    socket.on('sensorData', handleSensorData);
+    return () => socket.off('sensorData', handleSensorData);
+  }, []);
+
+  const handleTrashReset = () => {
+    setBaseTrashDist(currentTrashDist);
+    console.log(`Trash bin reset. New base distance: ${currentTrashDist}cm`);
+  };
 
   const handleDoorToggle = () => {
     const nextLockedState = !isLocked;
@@ -524,7 +539,7 @@ export default function App() {
               <h1 className="text-[40px] font-bold text-gray-900 tracking-tight leading-none mb-2">My Home</h1>
               <p className="text-gray-500 font-semibold tracking-wide text-sm">스마트 홈 제어 패널</p>
             </div>
-            <div className="flex items-center gap-4"><BiometricsWidget /><WeatherWidget /></div>
+            <div className="flex items-center gap-4"><TrashResetWidget onReset={handleTrashReset} /><WeatherWidget /></div>
           </header>
 
           <div className="grid grid-cols-2 gap-5 items-start">
@@ -532,9 +547,9 @@ export default function App() {
             <LightCard isOn={isLightOn} switches={lightSwitches} onTogglePower={handleTogglePower} onToggleSwitch={handleToggleSwitch} />
             <AcRemoteCard isOn={acPower} onTogglePower={handleAcPower} mode={acMode} onToggleMode={handleAcMode} temp={acTemp} onTempChange={handleAcTemp} />
             
-            <IndoorClimateCard raspberryIp={raspberryIp} />
+            <IndoorClimateCard />
             
-            <TrashBinCard raspberryIp={raspberryIp} />
+            <TrashBinCard currentDistance={currentTrashDist} baseDistance={baseTrashDist} />
             <PowerUsageCard />
           </div>
         </div>
