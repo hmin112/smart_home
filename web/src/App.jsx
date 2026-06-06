@@ -352,12 +352,13 @@ const IndoorClimateCard = () => {
 
 // --- 쓰레기통 수위 위젯 (API 연동) ---
 const TrashBinCard = ({ currentDistance, baseDistance }) => {
-  // 포화도 계산 로직 개선
+  // 포화도 계산 로직 개선 (3cm 여유분 적용)
   let percent = 0;
-  if (baseDistance > 0) {
-    // (기본 거리 - 현재 거리) / 기본 거리 * 100
-    // 예: 기본 80cm, 현재 20cm -> (80-20)/80 = 75%
-    percent = Math.round(((baseDistance - currentDistance) / baseDistance) * 100);
+  const MIN_DIST = 3; // 센서 사각지대를 고려한 최소 거리 (100% 기준)
+
+  if (baseDistance > MIN_DIST) {
+    // (바닥 거리 - 현재 거리) / (바닥 거리 - 3cm) * 100
+    percent = Math.round(((baseDistance - currentDistance) / (baseDistance - MIN_DIST)) * 100);
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
   }
@@ -366,7 +367,10 @@ const TrashBinCard = ({ currentDistance, baseDistance }) => {
 
   return (
     <div className="apple-widget relative rounded-[32px] overflow-hidden transition-all duration-500 h-48 hover:bg-white/90">
-      <div className="absolute bottom-0 left-0 w-full transition-all duration-1000 ease-in-out z-0 rounded-b-[32px]" style={{ height: `${percent}%` }}>
+      <div 
+        className="absolute bottom-0 left-0 w-full z-0 rounded-b-[32px] transition-[height] duration-1000 ease-in-out" 
+        style={{ height: `${percent}%` }}
+      >
         <svg className="absolute bottom-full left-0 w-[200%] h-[24px] z-0 opacity-80" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 120" preserveAspectRatio="none">
           <path d="M0,40 C150,80 350,0 600,40 C850,80 1050,0 1200,40 L1200,120 L0,120 Z" className={isFull ? "fill-red-200" : "fill-indigo-200"} style={{ animation: 'wave-slide 3s linear infinite' }}></path>
           <path d="M0,60 C200,20 400,100 600,60 C800,20 1000,100 1200,60 L1200,120 L0,120 Z" className={isFull ? "fill-red-300" : "fill-indigo-300"} style={{ animation: 'wave-slide 4s linear infinite reverse' }}></path>
