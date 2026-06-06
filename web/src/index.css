@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  /* 사진과 같이 위젯이 돋보일 수 있는 매우 밝고 부드러운 회파란색 베이스 */
+  background-color: #EBF0F5; 
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* 애플 위젯 특유의 뽀얗고 단정한 프로스트 글래스 느낌 */
+.apple-widget {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  
+  /* 위젯의 외곽선을 깔끔하게 잡아주는 얇은 흰색 테두리 */
+  border: 1px solid rgba(255, 255, 255, 1);
+  
+  /* 부드럽고 넓게 퍼지는 그림자로 공중에 떠있는 입체감 부여 */
+  box-shadow: 
+    0 12px 32px -8px rgba(0, 0, 0, 0.05),
+    0 4px 12px rgba(0, 0, 0, 0.02);
+}
+
+/* 켜진 상태(Active)일 때 완전히 불투명한 흰색으로 변하는 효과 */
+.apple-widget-active {
+  background: rgba(255, 255, 255, 1);
+  border: 1px solid rgba(255, 255, 255, 1);
+  box-shadow: 
+    0 16px 40px -10px rgba(0, 0, 0, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* 다이얼 회전 시 텍스트 드래그 방지 */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
