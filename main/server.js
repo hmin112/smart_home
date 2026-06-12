@@ -26,7 +26,8 @@ async function initDB() {
       host: 'localhost',
       user: 'smartuser',
       password: 'smartpassword',
-      database: 'smarthome'
+      database: 'smarthome',
+      timezone: '+00:00' // Force UTC for connection
     });
     console.log('Connected to MySQL database.');
   } catch (error) {
@@ -265,6 +266,73 @@ app.get('/api/power', async (req, res) => {
   } catch (error) {
     console.error('Power calculation error:', error);
     res.status(500).json({ error: 'Internal calculation error' });
+  }
+});
+
+app.get('/api/daily-usage', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not connected' });
+
+  // Helper to get YYYY-MM-DD in KST (local time)
+  const getKSTDateStr = (date) => {
+    // KST is UTC+9
+    const kstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+    return kstDate.toISOString().split('T')[0];
+  };
+
+  try {
+    // Get logs in UTC
+    const [rows] = await db.execute('SELECT device_id, status, UNIX_TIMESTAMP(changed_at) * 1000 as changed_ms FROM device_logs WHERE changed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY changed_at ASC');
+    
+    const dailyData = {};
+    const now = new Date();
+    
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now.getTime() - (i * 24 * 60 * 60 * 1000));
+      const dateStr = getKSTDateStr(d);
+      dailyData[dateStr] = { date: dateStr.substring(5), lightHours: 0, acHours: 0 };
+    }
+
+    let stateTracker = { '전등1': null, '전등2': null, '냉난방기': null };
+    
+    rows.forEach(row => {
+        const ms = row.changed_ms;
+        const dateStr = getKSTDateStr(new Date(ms));
+        
+        if (row.status === 'ON') {
+            stateTracker[row.device_id] = ms;
+        } else if (row.status === 'OFF' && stateTracker[row.device_id]) {
+            const durationHours = (ms - stateTracker[row.device_id]) / (1000 * 60 * 60);
+            
+            if (dailyData[dateStr]) {
+                if (row.device_id.startsWith('전등')) dailyData[dateStr].lightHours += durationHours;
+                if (row.device_id === '냉난방기') dailyData[dateStr].acHours += durationHours;
+            }
+            stateTracker[row.device_id] = null;
+        }
+    });
+
+    const currentTime = Date.now();
+    const todayStr = getKSTDateStr(new Date(currentTime));
+    
+    // Sync with in-memory deviceStatus to avoid stale 'ON' records from DB
+    // deviceStatus keys: light1, light2, ac
+    const devMap = { '전등1': 'light1', '전등2': 'light2', '냉난방기': 'ac' };
+
+    ['전등1', '전등2', '냉난방기'].forEach(dev => {
+        const memoryKey = devMap[dev];
+        const isCurrentlyOn = deviceStatus[memoryKey] === 'ON';
+
+        if (stateTracker[dev] && isCurrentlyOn && dailyData[todayStr]) {
+            const durationHours = (currentTime - stateTracker[dev]) / (1000 * 60 * 60);
+            if (dev.startsWith('전등')) dailyData[todayStr].lightHours += durationHours;
+            if (dev === '냉난방기') dailyData[todayStr].acHours += durationHours;
+        }
+    });
+
+    res.json(Object.values(dailyData));
+  } catch (error) {
+    console.error('Daily usage error:', error);
+    res.status(500).json({ error: 'Internal error' });
   }
 });
 

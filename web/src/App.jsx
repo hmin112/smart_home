@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Lock, Unlock, Lightbulb, Wind, Fingerprint, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2 } from 'lucide-react';
+import { Lock, Unlock, Lightbulb, Wind, Fingerprint, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2, BarChart2, X } from 'lucide-react';
 import io from 'socket.io-client';
 import axios from 'axios';
 
@@ -25,6 +25,98 @@ const GlobalStyles = () => (
     }
   `}</style>
 );
+
+// --- 일일 사용량 히스토그램 모달 ---
+const UsageChartModal = ({ isOpen, onClose, deviceType }) => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      setLoading(true);
+      axios.get(`http://${raspberryIp}:3001/api/daily-usage`)
+        .then(res => {
+          console.log("Usage Data received:", res.data);
+          setData(res.data);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error("사용량 데이터 로드 실패", err);
+          setLoading(false);
+        });
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const rawMax = Math.max(...data.map(d => deviceType === 'light' ? d.lightHours : d.acHours), 0);
+  const totalToday = data.length > 0 ? (deviceType === 'light' ? data[data.length-1].lightHours : data[data.length-1].acHours) : 0;
+  const maxHours = rawMax > 0 ? rawMax : 1;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/10 backdrop-blur-md transition-all duration-300" onClick={onClose}>
+      <div 
+        className="apple-widget w-full max-w-lg rounded-[40px] p-10 relative shadow-2xl border border-white/50" 
+        onClick={e => e.stopPropagation()}
+      >
+        <button onClick={onClose} className="absolute top-8 right-8 p-2.5 rounded-full bg-gray-100/50 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-all">
+          <X size={20} strokeWidth={2.5} />
+        </button>
+        
+        <div className="flex items-center gap-5 mb-12">
+          <div className={`p-4 rounded-3xl ${deviceType === 'light' ? 'bg-yellow-400' : 'bg-blue-500'} text-white shadow-lg`}>
+            <BarChart2 size={32} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-gray-900">
+              {deviceType === 'light' ? '전등 일일 사용' : '냉난방기 일일 사용'}
+            </h2>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] opacity-70">Statistics</p>
+              <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+              <p className="text-[11px] font-black text-blue-500 uppercase tracking-tight">Today: {totalToday < 1 ? `${Math.round(totalToday * 60)}m` : `${totalToday.toFixed(1)}h`}</p>
+            </div>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="h-64 flex items-center justify-center">
+            <Loader2 className="animate-spin text-gray-300" size={40} />
+          </div>
+        ) : (
+          <div className="flex items-end justify-between h-64 gap-3 px-2">
+            {data.map((d, i) => {
+              const hours = deviceType === 'light' ? d.lightHours : d.acHours;
+              const height = (hours / maxHours) * 100;
+              
+              // 1시간 미만일 경우 분(m) 단위로 표시
+              const displayVal = hours < 1 && hours > 0 
+                ? `${Math.round(hours * 60)}m` 
+                : `${hours.toFixed(1)}h`;
+
+              return (
+                <div key={i} className="flex-1 h-full flex flex-col justify-end items-center group">
+                  <div className="relative w-full h-full flex flex-col justify-end items-center">
+                    <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-all duration-300 bg-gray-900 text-white text-[11px] font-black px-3 py-1.5 rounded-xl shadow-xl transform -translate-y-1 group-hover:translate-y-0 whitespace-nowrap z-20">
+                      {displayVal}
+                    </div>
+                    <div 
+                      className={`w-full max-w-[32px] rounded-t-2xl transition-all duration-1000 ease-out shadow-md ${deviceType === 'light' ? 'bg-yellow-400/50 group-hover:bg-yellow-400' : 'bg-blue-500/50 group-hover:bg-blue-500'}`}
+                      style={{ height: `${hours > 0 ? Math.max(height, 8) : 2}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] font-black text-gray-400 mt-5 group-hover:text-gray-900 transition-colors tracking-tighter shrink-0">
+                    {d.date}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // --- 상단 헤더용: 쓰레기통 수위 초기화 위젯 ---
 const TrashResetWidget = ({ onReset }) => (
@@ -141,7 +233,7 @@ const DoorLockCard = ({ isLocked, onClick, logs }) => {
 };
 
 // --- 전등 전용 위젯 ---
-const LightCard = ({ isOn, switches, onTogglePower, onToggleSwitch }) => {
+const LightCard = ({ isOn, switches, onTogglePower, onToggleSwitch, onShowChart }) => {
   let statusText = '선택 안됨';
   if (isOn) {
     if (switches.s1 && switches.s2) statusText = '1 & 2 켜짐';
@@ -177,6 +269,13 @@ const LightCard = ({ isOn, switches, onTogglePower, onToggleSwitch }) => {
           >
             2
           </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onShowChart(); }}
+            className="w-8 h-8 rounded-full bg-gray-100/80 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-all flex items-center justify-center ml-1"
+            title="사용 통계"
+          >
+            <BarChart2 size={16} strokeWidth={2.5} />
+          </button>
         </div>
       </div>
 
@@ -193,7 +292,7 @@ const LightCard = ({ isOn, switches, onTogglePower, onToggleSwitch }) => {
 };
 
 // --- 에어컨 리모컨 컴포넌트 ---
-const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempChange }) => {
+const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempChange, onShowChart }) => {
   const colorBlue = '#007AFF';
   const colorRed = '#FF3B30';
   const activeColor = mode === 'cool' ? 'text-blue-500' : 'text-red-500';
@@ -269,6 +368,13 @@ const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempCha
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onShowChart(); }}
+              className="p-3 rounded-full bg-gray-100/80 text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-all shadow-sm"
+              title="사용 통계"
+            >
+              <BarChart2 size={20} strokeWidth={2.5} />
+            </button>
             <div className="flex items-center bg-gray-100/80 p-1 rounded-full border border-gray-200/50">
               <button onClick={() => onToggleMode('cool')} className={`px-4 py-1.5 rounded-full text-[12px] font-bold transition-all duration-300 ${mode === 'cool' ? 'bg-white text-blue-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>냉방</button>
               <button onClick={() => onToggleMode('heat')} className={`px-4 py-1.5 rounded-full text-[12px] font-bold transition-all duration-300 ${mode === 'heat' ? 'bg-white text-red-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>난방</button>
@@ -442,6 +548,9 @@ export default function App() {
   const [isLocked, setIsLocked] = useState(true);
   const [doorLogs, setDoorLogs] = useState(["09:00 - 문이 잠겼습니다."]);
 
+  // Chart Modal State
+  const [chartModal, setChartModal] = useState({ isOpen: false, type: 'light' });
+
   // Trash Bin State
   const [currentTrashDist, setCurrentTrashDist] = useState(30);
   const [baseTrashDist, setBaseTrashDist] = useState(30);
@@ -536,6 +645,11 @@ export default function App() {
   return (
     <>
       <GlobalStyles />
+      <UsageChartModal 
+        isOpen={chartModal.isOpen} 
+        onClose={() => setChartModal(prev => ({ ...prev, isOpen: false }))} 
+        deviceType={chartModal.type} 
+      />
       <div className="min-h-screen py-16 px-6 flex flex-col items-center relative select-none bg-[#F5F7FA]">
         <div className="w-full max-w-3xl mx-auto z-10">
           <header className="mb-10 flex justify-between items-end">
@@ -548,8 +662,22 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-5 items-start">
             <DoorLockCard isLocked={isLocked} onClick={handleDoorToggle} logs={doorLogs} />
-            <LightCard isOn={isLightOn} switches={lightSwitches} onTogglePower={handleTogglePower} onToggleSwitch={handleToggleSwitch} />
-            <AcRemoteCard isOn={acPower} onTogglePower={handleAcPower} mode={acMode} onToggleMode={handleAcMode} temp={acTemp} onTempChange={handleAcTemp} />
+            <LightCard 
+              isOn={isLightOn} 
+              switches={lightSwitches} 
+              onTogglePower={handleTogglePower} 
+              onToggleSwitch={handleToggleSwitch} 
+              onShowChart={() => setChartModal({ isOpen: true, type: 'light' })}
+            />
+            <AcRemoteCard 
+              isOn={acPower} 
+              onTogglePower={handleAcPower} 
+              mode={acMode} 
+              onToggleMode={handleAcMode} 
+              temp={acTemp} 
+              onTempChange={handleAcTemp} 
+              onShowChart={() => setChartModal({ isOpen: true, type: 'ac' })}
+            />
             
             <IndoorClimateCard />
             
