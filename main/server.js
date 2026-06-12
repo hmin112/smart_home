@@ -77,47 +77,67 @@ try {
 }
 
 // Serial Ports setup
-// NOTE: These paths (/dev/ttyACM0, /dev/ttyUSB0) might need adjustment based on actual hardware
-let arduino1, arduino2;
-try {
-  arduino1 = new SerialPort({ path: '/dev/ttyACM0', baudRate: 9600 });
-  arduino1.on('error', function(err) {
-    console.log('Arduino 1 Error: ', err.message);
-  });
-  const parser1 = arduino1.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-  parser1.on('data', (data) => {
-    // Expected: T:25.0,H:60.0
-    if (data.startsWith('T:')) {
-      const parts = data.split(',');
-      if (parts.length === 2) {
-        const temp = parseFloat(parts[0].substring(2));
-        const hum = parseFloat(parts[1].substring(2));
-        io.emit('sensorData', { type: 'dht11', temperature: temp, humidity: hum });
+let arduino1 = { 
+  path: 'none',
+  write: (data) => console.log(`[Arduino 1 Not Ready] Would have sent: ${data}`) 
+};
+let arduino2 = { 
+  path: 'none',
+  write: (data) => console.log(`[Arduino 2 Not Ready] Would have sent: ${data}`) 
+};
+
+async function setupSerial() {
+  try {
+    const ports = await SerialPort.list();
+    console.log('--- Serial Port Discovery ---');
+    console.log('Available ports:', ports.map(p => p.path));
+
+    for (const portInfo of ports) {
+      const path = portInfo.path;
+      if (path.includes('ttyACM') || path.includes('ttyUSB')) {
+        console.log(`Attempting to open port: ${path}`);
+        const port = new SerialPort({ path, baudRate: 9600 });
+        const parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
+        
+        port.on('open', () => console.log(`Port ${path} successfully opened.`));
+
+        parser.on('data', (data) => {
+          // Identify Arduino 1 by "T:" (Temperature)
+          if (data.startsWith('T:')) {
+            if (arduino1.path !== path) {
+              console.log(`[ID] Arduino 1 (DHT11/Lights) identified on ${path}`);
+              arduino1 = port;
+            }
+            const parts = data.split(',');
+            if (parts.length === 2) {
+              const temp = parseFloat(parts[0].substring(2));
+              const hum = parseFloat(parts[1].substring(2));
+              io.emit('sensorData', { type: 'dht11', temperature: temp, humidity: hum });
+            }
+          } 
+          // Identify Arduino 2 by "D:" (Distance)
+          else if (data.startsWith('D:')) {
+            if (arduino2.path !== path) {
+              console.log(`[ID] Arduino 2 (Ultrasonic/AC) identified on ${path}`);
+              arduino2 = port;
+            }
+            const distance = parseFloat(data.substring(2));
+            io.emit('sensorData', { type: 'ultrasonic', distance });
+          } else {
+            console.log(`[Unknown Data from ${path}]: ${data}`);
+          }
+        });
+
+        port.on('error', (err) => {
+          console.error(`[Error] Port ${path}:`, err.message);
+        });
       }
     }
-  });
-} catch (err) {
-  console.log('Arduino 1 (ttyACM0) not found. Mocking serial.');
-  arduino1 = { write: (data) => console.log(`Mock Arduino1 received: ${data}`) };
+  } catch (err) {
+    console.error('[Critical] Serial Setup Error:', err.message);
+  }
 }
-
-try {
-  arduino2 = new SerialPort({ path: '/dev/ttyACM1', baudRate: 9600 });
-  arduino2.on('error', function(err) {
-    console.log('Arduino 2 Error: ', err.message);
-  });
-  const parser2 = arduino2.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-  parser2.on('data', (data) => {
-    // Expected: D:15.2
-    if (data.startsWith('D:')) {
-      const distance = parseFloat(data.substring(2));
-      io.emit('sensorData', { type: 'ultrasonic', distance });
-    }
-  });
-} catch (err) {
-  console.log('Arduino 2 (ttyUSB0) not found. Mocking serial.');
-  arduino2 = { write: (data) => console.log(`Mock Arduino2 received: ${data}`) };
-}
+setupSerial();
 
 // Device Status Map
 const deviceStatus = {
@@ -145,7 +165,7 @@ io.on('connection', (socket) => {
 
   // Doorlock Control (Pulse signal)
   socket.on('toggleDoor', () => {
-    console.log('Toggling Doorlock');
+    console.log('Control: Toggling Doorlock');
     toggleDoorlock();
   });
 
@@ -155,7 +175,9 @@ io.on('connection', (socket) => {
     const deviceId = `light${data.id}`;
     if (deviceStatus[deviceId] !== data.status) {
       deviceStatus[deviceId] = data.status;
-      arduino1.write(`LIGHT${data.id}_${data.status}\n`);
+      const cmd = `LIGHT${data.id}_${data.status}\n`;
+      console.log(`Control: Sending to Arduino 1 (${arduino1.path}): ${cmd.trim()}`);
+      arduino1.write(cmd);
       await logDeviceState(`전등${data.id}`, data.status);
     }
   });
@@ -163,7 +185,7 @@ io.on('connection', (socket) => {
   // AC Control
   socket.on('setAC', async (data) => {
     // data: { command: 'AC_COOL_18', rawStatus: 'ON' } 
-    // We send the specific command to Arduino 2
+    console.log(`Control: Sending to Arduino 2 (${arduino2.path}): ${data.command}`);
     arduino2.write(`${data.command}\n`);
     
     if (deviceStatus.ac !== data.rawStatus) {

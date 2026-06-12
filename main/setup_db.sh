@@ -2,15 +2,15 @@
 
 echo "Starting MySQL Setup for Smart Home..."
 
-# 1. Update and install MySQL
-echo "Installing MySQL Server..."
+# 1. Update and install MariaDB
+echo "Installing MariaDB Server..."
 sudo apt-get update
-sudo apt-get install -y mysql-server
+sudo apt-get install -y mariadb-server
 
-# 2. Enable and start MySQL service
-echo "Enabling and starting MySQL service..."
-sudo systemctl enable mysql
-sudo systemctl start mysql
+# 2. Enable and start MariaDB service
+echo "Enabling and starting MariaDB service..."
+sudo systemctl enable mariadb
+sudo systemctl start mariadb
 
 # 3. Create database and table
 echo "Setting up database and schema..."
