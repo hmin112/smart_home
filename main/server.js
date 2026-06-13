@@ -63,37 +63,81 @@ let lastKnownTemp = 25; // Default
 function runAutomationLogic(temp) {
   if (!automationSettings.enabled) return;
 
-  // 여름/냉방 자동화 (최고 27도 제한)
-  if (temp >= 27 && !deviceStates.acPower) {
-    const cmd = `AC_POWER_ON_COOL_${automationSettings.targetTemp}`;
-    arduino2.write(cmd + '\n');
-    deviceStates.acPower = true;
-    deviceStates.acMode = 'cool';
-    deviceStates.acTemp = automationSettings.targetTemp;
-    logDeviceState('냉난방기', 'ON_COOL_' + automationSettings.targetTemp);
-    saveDeviceStates();
-    io.emit('initialStates', deviceStates);
-  } 
-  // 겨울/난방 자동화 (최저 22도 제한)
-  else if (temp <= 22 && !deviceStates.acPower) {
-    const cmd = `AC_POWER_ON_HEAT_${automationSettings.targetTemp}`;
-    arduino2.write(cmd + '\n');
-    deviceStates.acPower = true;
-    deviceStates.acMode = 'heat';
-    deviceStates.acTemp = automationSettings.targetTemp;
-    logDeviceState('냉난방기', 'ON_HEAT_' + automationSettings.targetTemp);
-    saveDeviceStates();
-    io.emit('initialStates', deviceStates);
+  const currentMonth = new Date().getMonth(); 
+  // 3월(2) ~ 10월(9) : 에어컨(냉방) 시즌
+  const isSummerSeason = currentMonth >= 2 && currentMonth <= 9;
+
+  // 1. 시즌에 따른 강제 모드 및 온도 보정
+  let targetMode = isSummerSeason ? 'cool' : 'heat';
+  let targetTemp = automationSettings.targetTemp;
+
+  // 온도 범위 보정 (Arduino 지원 및 기기 한계)
+  if (targetMode === 'cool') {
+    if (targetTemp < 18) targetTemp = 18;
+    if (targetTemp > 27) targetTemp = 27;
+  } else {
+    // 난방은 23도부터 지원 (Arduino 코드 기준)
+    if (targetTemp < 23) targetTemp = 23;
+    if (targetTemp > 30) targetTemp = 30;
   }
-  // 자동 종료 로직 (온도가 적절해지면)
-  else if (deviceStates.acPower) {
-    if (deviceStates.acMode === 'cool' && temp <= 25) {
+
+  // 2. 가동/종료 로직
+  if (targetMode === 'cool') {
+    // 냉방 작동 (실내온도 >= 설정온도 + 1)
+    if (temp >= targetTemp + 1 && !deviceStates.acPower) {
+      // Arduino 지원 명령어로 켜기 (COOL_18) 후 온도 조절
+      arduino2.write('AC_POWER_ON_COOL_18\n');
+      if (targetTemp > 18) {
+        setTimeout(() => arduino2.write(`AC_COOL_${targetTemp}\n`), 1000);
+      }
+      deviceStates.acPower = true;
+      deviceStates.acMode = 'cool';
+      deviceStates.acTemp = targetTemp;
+      logDeviceState('냉난방기', `ON_COOL_${targetTemp}`);
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    } 
+    // 냉방 종료 (실내온도 <= 설정온도)
+    else if (temp <= targetTemp && deviceStates.acPower && deviceStates.acMode === 'cool') {
       arduino2.write('AC_POWER_OFF\n');
       deviceStates.acPower = false;
       logDeviceState('냉난방기', 'OFF');
       saveDeviceStates();
       io.emit('initialStates', deviceStates);
-    } else if (deviceStates.acMode === 'heat' && temp >= 24) {
+    }
+    // 여름 시즌인데 난방 중이면 즉시 종료
+    else if (deviceStates.acPower && deviceStates.acMode === 'heat') {
+      arduino2.write('AC_POWER_OFF\n');
+      deviceStates.acPower = false;
+      logDeviceState('냉난방기', 'OFF');
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    }
+  } else { // Winter Mode (Heat)
+    // 난방 작동 (실내온도 <= 설정온도 - 1)
+    if (temp <= targetTemp - 1 && !deviceStates.acPower) {
+      // Arduino 지원 명령어로 켜기 (HEAT_26) 후 온도 조절
+      arduino2.write('AC_POWER_ON_HEAT_26\n');
+      if (targetTemp !== 26) {
+        setTimeout(() => arduino2.write(`AC_HEAT_${targetTemp}\n`), 1000);
+      }
+      deviceStates.acPower = true;
+      deviceStates.acMode = 'heat';
+      deviceStates.acTemp = targetTemp;
+      logDeviceState('냉난방기', `ON_HEAT_${targetTemp}`);
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    }
+    // 난방 종료 (실내온도 >= 설정온도)
+    else if (temp >= targetTemp && deviceStates.acPower && deviceStates.acMode === 'heat') {
+      arduino2.write('AC_POWER_OFF\n');
+      deviceStates.acPower = false;
+      logDeviceState('냉난방기', 'OFF');
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    }
+    // 겨울 시즌인데 냉방 중이면 즉시 종료
+    else if (deviceStates.acPower && deviceStates.acMode === 'cool') {
       arduino2.write('AC_POWER_OFF\n');
       deviceStates.acPower = false;
       logDeviceState('냉난방기', 'OFF');
@@ -454,15 +498,20 @@ app.post('/api/settings', async (req, res) => {
 app.get('/api/automation', (req, res) => res.json(automationSettings));
 
 app.post('/api/automation', async (req, res) => {
+  const previousEnabled = automationSettings.enabled;
   automationSettings.enabled = req.body.enabled !== undefined ? req.body.enabled : automationSettings.enabled;
   automationSettings.targetTemp = req.body.targetTemp !== undefined ? req.body.targetTemp : automationSettings.targetTemp;
   
   // 즉시 자동화 로직 적용
   if (automationSettings.enabled) {
     runAutomationLogic(lastKnownTemp);
-  } else if (!automationSettings.enabled && deviceStates.acPower) {
-    // 자동화가 꺼졌을 때 에어컨이 켜져있다면 (자동화에 의해 켜진 경우 등) 끌지 말지는 정책에 따라 다름.
-    // 여기서는 자동화가 꺼졌다고 해서 에어컨을 강제로 끄지는 않음 (사용자 수동 제어 존중)
+  } else if (previousEnabled && !automationSettings.enabled && deviceStates.acPower) {
+    // 자동화가 꺼졌을 때 냉난방기가 켜져있다면 (자동화에 의해 켜진 경우 등) 끔
+    arduino2.write('AC_POWER_OFF\n');
+    deviceStates.acPower = false;
+    logDeviceState('냉난방기', 'OFF');
+    saveDeviceStates();
+    io.emit('initialStates', deviceStates);
   }
 
   if (db) {

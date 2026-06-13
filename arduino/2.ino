@@ -52,6 +52,7 @@ void loop() {
     
     if (command == "AC_POWER_ON_COOL_18") { IrSender.sendNEC(address, 0xC005, 1); }
     else if (command == "AC_POWER_ON_HEAT_26") { IrSender.sendNEC(address, 0x04B4, 1); }
+    else if (command == "AC_POWER_OFF") { IrSender.sendNEC(address, 0x1008, 1); }
     else if (command == "AC_POWER_COOL") { IrSender.sendNEC(address, 0x1008, 1); }
     else if (command == "AC_COOL_18") { IrSender.sendNEC(address, 0x0834, 1); }
     else if (command == "AC_COOL_19") { IrSender.sendNEC(address, 0x0844, 1); }
