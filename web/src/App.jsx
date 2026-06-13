@@ -117,7 +117,7 @@ const EnergyAdvisorModal = ({ isOpen, onClose }) => {
             <div className="grid grid-cols-2 gap-8">
               <div className="space-y-4">
                 <div className="flex justify-between items-end">
-                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">기온 대비 효율</span>
+                  <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">실시간 기온 대비 효율</span>
                   <div className="flex items-center gap-1">
                     {data.efficiencyPercent > 100 ? <TrendingUp size={14} className="text-orange-500" /> : <TrendingDown size={14} className="text-green-500" />}
                     <span className={`text-lg font-bold ${data.efficiencyPercent > 100 ? 'text-orange-500' : 'text-green-500'}`}>
@@ -322,18 +322,24 @@ const WeatherModal = ({ isOpen, onClose }) => {
             {/* 시간대별 예보 (수평 스크롤) */}
             <div className="w-full mb-10 overflow-x-auto no-scrollbar pb-2">
               <div className="flex gap-6 min-w-max px-2">
-                {data.hourly.time.slice(0, 24).map((time, i) => {
-                  const isNow = i === 0;
-                  const hInfo = getWeatherConfig(isNow ? data.current.weather_code : data.hourly.weather_code[i]);
-                  const hour = new Date(time).getHours();
-                  return (
-                    <div key={i} className={`flex flex-col items-center gap-3 ${isNow ? 'bg-indigo-50 px-4 py-3 rounded-2xl border border-indigo-100' : ''}`}>
-                      <span className={`text-[11px] font-black uppercase ${isNow ? 'text-indigo-500' : 'text-gray-400'}`}>{isNow ? '지금' : `${hour}시`}</span>
-                      <hInfo.icon size={22} className={hInfo.color} strokeWidth={2.5} />
-                      <span className={`text-sm font-bold ${isNow ? 'text-indigo-900' : 'text-gray-800'}`}>{Math.round(data.hourly.temperature_2m[i])}°</span>
-                    </div>
-                  );
-                })}
+                {(() => {
+                  const currentHourPrefix = data.current.time.substring(0, 13);
+                  let sIdx = data.hourly.time.findIndex(t => t.startsWith(currentHourPrefix));
+                  if (sIdx === -1) sIdx = 0;
+                  
+                  return data.hourly.time.slice(sIdx, sIdx + 24).map((time, i) => {
+                    const isNow = i === 0;
+                    const hInfo = getWeatherConfig(isNow ? data.current.weather_code : data.hourly.weather_code[sIdx + i]);
+                    const hour = new Date(time).getHours();
+                    return (
+                      <div key={i} className={`flex flex-col items-center gap-3 ${isNow ? 'bg-indigo-50 px-4 py-3 rounded-2xl border border-indigo-100' : ''}`}>
+                        <span className={`text-[11px] font-black uppercase ${isNow ? 'text-indigo-500' : 'text-gray-400'}`}>{isNow ? '지금' : `${hour}시`}</span>
+                        <hInfo.icon size={22} className={hInfo.color} strokeWidth={2.5} />
+                        <span className={`text-sm font-bold ${isNow ? 'text-indigo-900' : 'text-gray-800'}`}>{Math.round(data.hourly.temperature_2m[sIdx + i])}°</span>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
 
