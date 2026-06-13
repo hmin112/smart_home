@@ -495,12 +495,12 @@ export default function App() {
           </header>
 
           <div className="grid grid-cols-2 gap-5 items-start">
-            {/* 왼쪽: 도어락 / 오른쪽: 실내 온습도 */}
+            {/* 왼쪽: 도어락 / 오른쪽: 전등 */}
             <DoorLockCard isLocked={isLocked} onClick={handleDoorToggle} logs={doorLogs} />
-            <IndoorClimateCard />
-
-            {/* 왼쪽: 전등 / 오른쪽: 쓰레기통 포화도 */}
             <LightCard isOn={isLightOn} switches={lightSwitches} onTogglePower={handleTogglePower} onToggleSwitch={handleToggleSwitch} onShowChart={() => setChartModal({ isOpen: true, type: 'light' })} />
+
+            {/* 왼쪽: 실내 온습도 / 오른쪽: 쓰레기통 포화도 */}
+            <IndoorClimateCard />
             <TrashBinCard currentDistance={currentTrashDist} baseDistance={baseTrashDist} />
 
             {/* 냉난방기 (2칸 차지) */}
