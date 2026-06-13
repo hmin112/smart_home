@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS device_logs (
     changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key_name VARCHAR(50) PRIMARY KEY,
+    value_json JSON NOT NULL
+);
+
 -- Create a user for the Node.js backend to connect
 CREATE USER IF NOT EXISTS 'smartuser'@'localhost' IDENTIFIED BY 'smartpassword';
 GRANT ALL PRIVILEGES ON smarthome.* TO 'smartuser'@'localhost';

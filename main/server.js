@@ -29,6 +29,7 @@ async function initDB() {
       timezone: '+00:00'
     });
     console.log('Connected to MySQL database.');
+    await loadDeviceStates(); // Load states immediately after connection
   } catch (error) {
     console.error('Failed to connect to MySQL:', error.message);
   }
@@ -57,6 +58,50 @@ try {
 
 let arduino1 = { write: (data) => {} };
 let arduino2 = { write: (data) => {} };
+let lastKnownTemp = 25; // Default
+
+function runAutomationLogic(temp) {
+  if (!automationSettings.enabled) return;
+
+  // 여름/냉방 자동화 (최고 27도 제한)
+  if (temp >= 27 && !deviceStates.acPower) {
+    const cmd = `AC_POWER_ON_COOL_${automationSettings.targetTemp}`;
+    arduino2.write(cmd + '\n');
+    deviceStates.acPower = true;
+    deviceStates.acMode = 'cool';
+    deviceStates.acTemp = automationSettings.targetTemp;
+    logDeviceState('냉난방기', 'ON_COOL_' + automationSettings.targetTemp);
+    saveDeviceStates();
+    io.emit('initialStates', deviceStates);
+  } 
+  // 겨울/난방 자동화 (최저 22도 제한)
+  else if (temp <= 22 && !deviceStates.acPower) {
+    const cmd = `AC_POWER_ON_HEAT_${automationSettings.targetTemp}`;
+    arduino2.write(cmd + '\n');
+    deviceStates.acPower = true;
+    deviceStates.acMode = 'heat';
+    deviceStates.acTemp = automationSettings.targetTemp;
+    logDeviceState('냉난방기', 'ON_HEAT_' + automationSettings.targetTemp);
+    saveDeviceStates();
+    io.emit('initialStates', deviceStates);
+  }
+  // 자동 종료 로직 (온도가 적절해지면)
+  else if (deviceStates.acPower) {
+    if (deviceStates.acMode === 'cool' && temp <= 25) {
+      arduino2.write('AC_POWER_OFF\n');
+      deviceStates.acPower = false;
+      logDeviceState('냉난방기', 'OFF');
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    } else if (deviceStates.acMode === 'heat' && temp >= 24) {
+      arduino2.write('AC_POWER_OFF\n');
+      deviceStates.acPower = false;
+      logDeviceState('냉난방기', 'OFF');
+      saveDeviceStates();
+      io.emit('initialStates', deviceStates);
+    }
+  }
+}
 
 async function setupSerial() {
   try {
@@ -71,7 +116,13 @@ async function setupSerial() {
             arduino1 = port;
             const parts = data.split(',');
             if (parts.length === 2) {
-              io.emit('sensorData', { type: 'dht11', temperature: parseFloat(parts[0].substring(2)), humidity: parseFloat(parts[1].substring(2)) });
+              const temp = parseFloat(parts[0].substring(2));
+              const hum = parseFloat(parts[1].substring(2));
+              lastKnownTemp = temp; // 전역 변수로 온도 저장
+              io.emit('sensorData', { type: 'dht11', temperature: temp, humidity: hum });
+
+              // 지능형 자동화: 쾌적 모드 (Comfort Mode)
+              runAutomationLogic(temp);
             }
           } 
           else if (data.startsWith('D:')) {
@@ -94,6 +145,8 @@ const deviceStates = {
   acTemp: 24
 };
 
+let automationSettings = { enabled: false, targetTemp: 26, lastSleepTrigger: 0 };
+
 async function saveDeviceStates() {
   if (db) {
     try {
@@ -108,13 +161,14 @@ async function saveDeviceStates() {
 async function loadDeviceStates() {
   if (!db) return;
   try {
-    const [rows] = await db.execute('SELECT value_json FROM settings WHERE key_name = "device_states"');
-    if (rows[0]) {
-      let saved = rows[0].value_json;
+    const [rows] = await db.execute('SELECT key_name, value_json FROM settings WHERE key_name IN ("device_states", "automation_settings")');
+    rows.forEach(row => {
+      let saved = row.value_json;
       if (typeof saved === 'string') saved = JSON.parse(saved);
-      Object.assign(deviceStates, saved);
-    }
-  } catch (e) { console.error('Failed to load device states:', e); }
+      if (row.key_name === 'device_states') Object.assign(deviceStates, saved);
+      if (row.key_name === 'automation_settings') Object.assign(automationSettings, saved);
+    });
+  } catch (e) { console.error('Failed to load states:', e); }
 }
 
 async function logDeviceState(deviceId, status) {
@@ -360,12 +414,19 @@ app.get('/api/energy-advisor', async (req, res) => {
     else if (projectedBill >= targetBill * 0.8) status = '주의';
 
     let guide = "";
+    let recommendedTemp = 26;
+    if (temp > 30) recommendedTemp = 24;
+    else if (temp > 25) recommendedTemp = 26;
+    else if (temp < 10) recommendedTemp = 24;
+
     if (currentPowerW === 0) {
       guide = "현재 가동 중인 기기가 없어 에너지가 절약되고 있습니다.";
     } else if (efficiencyPercent > 120) {
-      guide = `현재 상태로 1시간 가동 시 실시간 기온 대비 전력 소모가 ${efficiencyPercent}%로 높습니다. 설정을 조절해 보세요.`;
+      guide = `현재 전력 소모가 실시간 기온 대비 ${efficiencyPercent}%로 매우 높습니다. 에어컨 온도를 ${recommendedTemp}도 이상으로 높이거나 외출 시 전원을 꺼주세요.`;
+    } else if (efficiencyPercent > 100) {
+      guide = `전력 소모가 다소 높습니다. 에어컨 설정을 ${recommendedTemp}도로 조절하면 효율적인 에너지 관리가 가능합니다.`;
     } else {
-      guide = "현재 상태로 1시간 가동 시 실시간 기온 대비 권장 전력량을 잘 유지합니다.";
+      guide = "현재 실시간 기온 대비 권장 전력량을 아주 잘 유지하고 있습니다. 훌륭한 에너지 습관입니다!";
     }
 
     res.json({
@@ -386,5 +447,58 @@ app.post('/api/settings', async (req, res) => {
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+app.get('/api/automation', (req, res) => res.json(automationSettings));
+
+app.post('/api/automation', async (req, res) => {
+  automationSettings.enabled = req.body.enabled !== undefined ? req.body.enabled : automationSettings.enabled;
+  automationSettings.targetTemp = req.body.targetTemp !== undefined ? req.body.targetTemp : automationSettings.targetTemp;
+  
+  // 즉시 자동화 로직 적용
+  if (automationSettings.enabled) {
+    runAutomationLogic(lastKnownTemp);
+  } else if (!automationSettings.enabled && deviceStates.acPower) {
+    // 자동화가 꺼졌을 때 에어컨이 켜져있다면 (자동화에 의해 켜진 경우 등) 끌지 말지는 정책에 따라 다름.
+    // 여기서는 자동화가 꺼졌다고 해서 에어컨을 강제로 끄지는 않음 (사용자 수동 제어 존중)
+  }
+
+  if (db) {
+    try {
+      await db.execute(
+        'INSERT INTO settings (key_name, value_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE value_json = VALUES(value_json)',
+        ['automation_settings', JSON.stringify(automationSettings)]
+      );
+      res.json({ success: true, settings: automationSettings });
+    } catch (e) {
+      console.error('Failed to save automation settings:', e);
+      res.status(500).json({ error: e.message });
+    }
+  } else {
+    res.status(500).json({ error: 'DB not connected' });
+  }
+});
+
+setInterval(() => {
+  if (automationSettings.enabled) {
+    const now = new Date();
+    // 자정(00:00) 정각 확인
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+      if (now.getTime() - automationSettings.lastSleepTrigger > 60000) {
+        automationSettings.lastSleepTrigger = now.getTime();
+        if (deviceStates.isLightOn) {
+          arduino1.write('LIGHT1_OFF\n');
+          setTimeout(() => arduino1.write('LIGHT2_OFF\n'), 200);
+          deviceStates.isLightOn = false;
+          deviceStates.lightSwitches.s1 = false;
+          deviceStates.lightSwitches.s2 = false;
+          logDeviceState('전등1', 'OFF');
+          logDeviceState('전등2', 'OFF');
+          saveDeviceStates();
+          io.emit('initialStates', deviceStates);
+        }
+      }
+    }
+  }
+}, 10000);
 
 server.listen(3001, () => { console.log('Backend server running on port 3001'); });

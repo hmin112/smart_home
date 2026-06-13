@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Lock, Unlock, Lightbulb, Wind, Fingerprint, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2, BarChart2, X, TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Lock, Unlock, Lightbulb, Wind, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2, BarChart2, X, TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react';
 import io from 'socket.io-client';
 import axios from 'axios';
 
@@ -34,14 +34,15 @@ const EnergyAdvisorModal = ({ isOpen, onClose }) => {
   const [newTarget, setNewTarget] = useState('');
 
   const fetchAdvisorData = async () => {
+    setLoading(true);
     try {
       const response = await axios.get(`http://${raspberryIp}:3001/api/energy-advisor`);
       if (response.data) {
         setData(response.data);
         setNewTarget((response.data.targetBill || 50000).toString());
       }
-    } catch (error) {
-      console.error("Advisor 데이터 로드 실패", error);
+    } catch {
+      console.error("Advisor 데이터 로드 실패");
     } finally {
       setLoading(false);
     }
@@ -49,7 +50,6 @@ const EnergyAdvisorModal = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setLoading(true);
       fetchAdvisorData();
     }
   }, [isOpen]);
@@ -62,7 +62,7 @@ const EnergyAdvisorModal = ({ isOpen, onClose }) => {
       });
       setIsEditingTarget(false);
       fetchAdvisorData();
-    } catch (error) {
+    } catch {
       alert("목표 설정 업데이트 실패");
     }
   };
@@ -194,16 +194,18 @@ const UsageChartModal = ({ isOpen, onClose, deviceType }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setLoading(true);
-      axios.get(`http://${raspberryIp}:3001/api/daily-usage`)
-        .then(res => {
+      const fetchData = async () => {
+        setLoading(true);
+        try {
+          const res = await axios.get(`http://${raspberryIp}:3001/api/daily-usage`);
           setData(res.data);
-          setLoading(false);
-        })
-        .catch(err => {
+        } catch (err) {
           console.error("사용량 데이터 로드 실패", err);
+        } finally {
           setLoading(false);
-        });
+        }
+      };
+      fetchData();
     }
   }, [isOpen]);
 
@@ -288,8 +290,8 @@ const WeatherModal = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (isOpen) {
-      setLoading(true);
       const fetchDetail = async () => {
+        setLoading(true);
         try {
           const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code&timezone=Asia%2FTokyo');
           const d = await res.json();
@@ -363,6 +365,129 @@ const WeatherModal = ({ isOpen, onClose }) => {
   );
 };
 
+// --- 자동화 설정 모달 ---
+const AutomationSettingsModal = ({ isOpen, onClose, auto, onUpdate }) => {
+  const [temp, setTemp] = useState(auto.targetTemp);
+
+  useEffect(() => {
+    if (isOpen) setTemp(auto.targetTemp);
+  }, [isOpen, auto.targetTemp]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center p-6 bg-black/10 backdrop-blur-md transition-all duration-300" onClick={onClose}>
+      <div 
+        className="apple-widget w-full max-w-sm rounded-[40px] p-10 relative shadow-2xl border border-white/50" 
+        onClick={e => e.stopPropagation()}
+      >
+        <button onClick={onClose} className="absolute top-8 right-8 p-2.5 rounded-full bg-gray-100/50 text-gray-400 hover:bg-gray-200 transition-all">
+          <X size={20} />
+        </button>
+        
+        <div className="flex flex-col items-center">
+          <div className="p-4 rounded-3xl bg-indigo-500 text-white shadow-lg mb-6">
+            <Zap size={32} />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">자동화 온도 설정</h2>
+          <p className="text-sm text-gray-400 font-medium mb-10">목표 온도를 조절하세요</p>
+          
+          <div className="w-full space-y-8">
+            <div className="flex justify-center items-end">
+              <span className="text-5xl font-black text-indigo-500">{temp}°C</span>
+            </div>
+            
+            <input 
+              type="range" 
+              min="18" 
+              max="30" 
+              value={temp} 
+              onChange={(e) => setTemp(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+            />
+            
+            <div className="flex justify-between text-[10px] font-bold text-gray-300 uppercase tracking-tighter">
+              <span>18°C (Min)</span>
+              <span>30°C (Max)</span>
+            </div>
+
+            <button 
+              onClick={() => {
+                onUpdate({ ...auto, targetTemp: temp });
+                onClose();
+              }}
+              className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-600 transition-all active:scale-95"
+            >
+              설정 완료
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- 지능형 자동화 스케줄러 위젯 ---
+const SmartAutomationWidget = () => {
+  const [auto, setAuto] = useState({ enabled: false, targetTemp: 26 });
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchAuto = async () => {
+      try {
+        const res = await axios.get(`http://${raspberryIp}:3001/api/automation`);
+        if (res.data) setAuto(res.data);
+      } catch { /* ignore */ }
+    };
+    fetchAuto();
+  }, []);
+
+  const toggleEnabled = async () => {
+    const next = { ...auto, enabled: !auto.enabled };
+    setAuto(next);
+    await axios.post(`http://${raspberryIp}:3001/api/automation`, next);
+  };
+
+  const updateAuto = async (next) => {
+    setAuto(next);
+    await axios.post(`http://${raspberryIp}:3001/api/automation`, next);
+  };
+
+  return (
+    <>
+      <AutomationSettingsModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        auto={auto} 
+        onUpdate={updateAuto} 
+      />
+      <div className="apple-widget px-4 py-2.5 rounded-3xl flex items-center gap-4 border border-gray-200/50 shadow-sm bg-white/50 hover:bg-white/80 transition-all">
+        <div className="flex flex-col items-center">
+          <span 
+            onClick={() => setIsModalOpen(true)}
+            className="text-[9px] font-black uppercase text-indigo-500 mb-1.5 tracking-widest cursor-pointer hover:text-indigo-700 transition-colors"
+          >
+            자동화 모드
+          </span>
+          <button 
+            onClick={toggleEnabled}
+            className={`w-10 h-5 rounded-full relative transition-colors duration-300 shadow-inner ${auto.enabled ? 'bg-indigo-500' : 'bg-gray-300'}`}
+          >
+            <div 
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform duration-300 shadow-sm ${auto.enabled ? 'translate-x-5' : 'translate-x-0'}`} 
+            />
+          </button>
+        </div>
+        <div className="w-px h-8 bg-gray-200/80"></div>
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] font-black uppercase text-gray-400 mb-0.5 tracking-widest">목표</span>
+          <span className="text-sm font-black text-gray-900">{auto.targetTemp}°</span>
+        </div>
+      </div>
+    </>
+  );
+};
+
 const WeatherWidget = ({ onClick }) => {
   const [weather, setWeather] = useState(null);
   useEffect(() => {
@@ -370,7 +495,7 @@ const WeatherWidget = ({ onClick }) => {
       try {
         const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current=temperature_2m,weather_code&timezone=Asia%2FTokyo');
         const data = await res.json(); setWeather(data.current);
-      } catch (e) {}
+      } catch { /* ignore */ }
     };
     fetchWeather(); setInterval(fetchWeather, 30 * 60 * 1000);
   }, []);
@@ -422,7 +547,7 @@ const LightCard = ({ isOn, switches, onTogglePower, onToggleSwitch, onShowChart 
 const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempChange, onShowChart }) => {
   const dialRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
-  const min = mode === 'cool' ? 18 : 23, max = mode === 'cool' ? 27 : 30;
+  const min = mode === 'cool' ? 18 : 22, max = mode === 'cool' ? 27 : 30;
   const progress = (temp - min) / (max - min);
   const rotation = -135 + (progress * 270);
   const offset = 188.4 - (188.4 * progress);
@@ -521,7 +646,7 @@ const TrashBinCard = ({ currentDistance, baseDistance }) => {
 const PowerUsageCard = ({ onShowAdvisor }) => {
   const [data, setData] = useState({ currentPowerW: 0, accumulatedKWh: 0, estimatedBill: 0 });
   useEffect(() => {
-    const fetch = async () => { try { const res = await axios.get(`http://${raspberryIp}:3001/api/power`); setData(res.data); } catch (e) {} };
+    const fetch = async () => { try { const res = await axios.get(`http://${raspberryIp}:3001/api/power`); setData(res.data); } catch { /* ignore */ } };
     fetch(); const itv = setInterval(fetch, 5000); return () => clearInterval(itv);
   }, []);
   return (
@@ -602,7 +727,7 @@ const WeatherPill = ({ onApplySettings, onStop }) => {
         }
 
         setAdvice({ msg, sub, emoji, settings });
-      } catch (e) {
+      } catch {
         setAdvice({ msg: "날씨 연동 실패", sub: "연결 확인", emoji: "⚠️", settings: null });
       }
     };
@@ -722,7 +847,11 @@ export default function App() {
         <div className="w-full max-w-3xl z-10">
           <header className="mb-10 flex justify-between items-end px-2">
             <div><h1 className="text-[40px] font-bold text-gray-900 leading-none mb-2">My Home</h1><p className="text-gray-500 font-semibold text-sm">스마트 홈 제어 패널</p></div>
-            <div className="flex items-center gap-4"><TrashResetWidget onReset={() => setBaseTrashDist(currentTrashDist)} /><WeatherWidget onClick={() => setIsWeatherOpen(true)} /></div>
+            <div className="flex items-center gap-4">
+              <SmartAutomationWidget />
+              <TrashResetWidget onReset={() => setBaseTrashDist(currentTrashDist)} />
+              <WeatherWidget onClick={() => setIsWeatherOpen(true)} />
+            </div>
           </header>
 
           {/* 날씨 맞춤 가이드 알약 위젯 */}
