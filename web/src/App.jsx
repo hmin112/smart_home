@@ -509,7 +509,20 @@ export default function App() {
   };
   const handleToggleSwitch = (id) => { setLightSwitches(p => { const n = { ...p, [id]: !p[id] }; if (isLightOn) socket.emit('setLight', { id: id === 's1' ? 1 : 2, status: n[id] ? 'ON' : 'OFF' }); return n; }); };
   const handleAcPower = () => { const n = !acPower; setAcPower(n); socket.emit('setAC', { command: n ? `AC_POWER_ON_${acMode.toUpperCase()}_${acTemp}` : 'AC_POWER_OFF', rawStatus: n ? 'ON' : 'OFF' }); };
-  const handleAcMode = (m) => { setAcMode(m); if (acPower) socket.emit('setAC', { command: `AC_${m.toUpperCase()}_${acTemp}`, rawStatus: 'ON' }); };
+  const handleAcMode = (m) => {
+    setAcMode(m);
+    
+    // Clamp temperature for the new mode
+    const min = m === 'cool' ? 18 : 23, max = m === 'cool' ? 27 : 30;
+    const clampedTemp = Math.min(Math.max(acTemp, min), max);
+    if (clampedTemp !== acTemp) {
+      setAcTemp(clampedTemp);
+    }
+
+    if (acPower) {
+      socket.emit('setAC', { command: `AC_${m.toUpperCase()}_${clampedTemp}`, rawStatus: 'ON' });
+    }
+  };
   const handleAcTemp = (t) => { setAcTemp(t); if (acPower) socket.emit('setAC', { command: `AC_${acMode.toUpperCase()}_${t}`, rawStatus: 'ON' }); };
 
   return (
