@@ -464,7 +464,38 @@ export default function App() {
   const [isLightOn, setIsLightOn] = useState(false), [lightSwitches, setLightSwitches] = useState({ s1: false, s2: false });
   const [acPower, setAcPower] = useState(false), [acMode, setAcMode] = useState('cool'), [acTemp, setAcTemp] = useState(24);
 
-  useEffect(() => { socket.on('sensorData', (d) => { if (d.type === 'ultrasonic') setCurrentTrashDist(d.distance); }); return () => socket.off('sensorData'); }, []);
+  // 초기 상태 불러오기
+  useEffect(() => {
+    const fetchStates = async () => {
+      try {
+        const res = await axios.get(`http://${raspberryIp}:3001/api/device-states`);
+        const s = res.data;
+        setIsLocked(s.isLocked);
+        setIsLightOn(s.isLightOn);
+        setLightSwitches(s.lightSwitches);
+        setAcPower(s.acPower);
+        setAcMode(s.acMode);
+        setAcTemp(s.acTemp);
+      } catch (e) { console.error("상태 로드 실패", e); }
+    };
+    fetchStates();
+
+    // Socket으로도 초기 상태 수신 대기
+    socket.on('initialStates', (s) => {
+      setIsLocked(s.isLocked);
+      setIsLightOn(s.isLightOn);
+      setLightSwitches(s.lightSwitches);
+      setAcPower(s.acPower);
+      setAcMode(s.acMode);
+      setAcTemp(s.acTemp);
+    });
+
+    socket.on('sensorData', (d) => { if (d.type === 'ultrasonic') setCurrentTrashDist(d.distance); });
+    return () => {
+      socket.off('initialStates');
+      socket.off('sensorData');
+    };
+  }, []);
 
   const handleDoorToggle = () => {
     const next = !isLocked; setIsLocked(next); socket.emit('toggleDoor');

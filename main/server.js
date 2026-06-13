@@ -85,7 +85,37 @@ async function setupSerial() {
 }
 setupSerial();
 
-const deviceStatus = { light1: 'OFF', light2: 'OFF', ac: 'OFF' };
+const deviceStates = {
+  isLocked: true,
+  isLightOn: false,
+  lightSwitches: { s1: false, s2: false },
+  acPower: false,
+  acMode: 'cool',
+  acTemp: 24
+};
+
+async function saveDeviceStates() {
+  if (db) {
+    try {
+      await db.execute(
+        'INSERT INTO settings (key_name, value_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE value_json = VALUES(value_json)',
+        ['device_states', JSON.stringify(deviceStates)]
+      );
+    } catch (e) { console.error('Failed to save device states:', e); }
+  }
+}
+
+async function loadDeviceStates() {
+  if (!db) return;
+  try {
+    const [rows] = await db.execute('SELECT value_json FROM settings WHERE key_name = "device_states"');
+    if (rows[0]) {
+      let saved = rows[0].value_json;
+      if (typeof saved === 'string') saved = JSON.parse(saved);
+      Object.assign(deviceStates, saved);
+    }
+  } catch (e) { console.error('Failed to load device states:', e); }
+}
 
 async function logDeviceState(deviceId, status) {
   if (db) {
@@ -93,23 +123,48 @@ async function logDeviceState(deviceId, status) {
   }
 }
 
-io.on('connection', (socket) => {
-  socket.on('toggleDoor', () => toggleDoorlock());
+io.on('connection', async (socket) => {
+  await loadDeviceStates();
+  socket.emit('initialStates', deviceStates);
+
+  socket.on('toggleDoor', async () => {
+    deviceStates.isLocked = !deviceStates.isLocked;
+    toggleDoorlock();
+    await saveDeviceStates();
+  });
+
   socket.on('setLight', async (data) => {
-    const deviceId = `light${data.id}`;
-    if (deviceStatus[deviceId] !== data.status) {
-      deviceStatus[deviceId] = data.status;
-      arduino1.write(`LIGHT${data.id}_${data.status}\n`);
-      await logDeviceState(`전등${data.id}`, data.status);
-    }
+    const { id, status } = data;
+    const switchKey = `s${id}`;
+    deviceStates.lightSwitches[switchKey] = (status === 'ON');
+    
+    // Update global power state: if any switch is ON, isLightOn is true
+    deviceStates.isLightOn = deviceStates.lightSwitches.s1 || deviceStates.lightSwitches.s2;
+    
+    arduino1.write(`LIGHT${id}_${status}\n`);
+    await logDeviceState(`전등${id}`, status);
+    await saveDeviceStates();
   });
+
   socket.on('setAC', async (data) => {
-    arduino2.write(`${data.command}\n`);
-    if (deviceStatus.ac !== data.rawStatus) {
-      deviceStatus.ac = data.rawStatus;
-      await logDeviceState('냉난방기', data.rawStatus);
-    }
+    const { command, rawStatus } = data;
+    arduino2.write(`${command}\n`);
+    
+    deviceStates.acPower = (rawStatus === 'ON');
+    if (command.includes('COOL')) deviceStates.acMode = 'cool';
+    else if (command.includes('HEAT')) deviceStates.acMode = 'heat';
+    
+    const tempMatch = command.match(/(\d+)$/);
+    if (tempMatch) deviceStates.acTemp = parseInt(tempMatch[1]);
+
+    await logDeviceState('냉난방기', rawStatus);
+    await saveDeviceStates();
   });
+});
+
+app.get('/api/device-states', async (req, res) => {
+  await loadDeviceStates();
+  res.json(deviceStates);
 });
 
 async function getUsageForPeriod(startDate, endDate) {
