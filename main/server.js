@@ -377,10 +377,11 @@ app.get('/api/energy-advisor', async (req, res) => {
       temp = weatherData.current_weather.temperature;
     } catch (e) { console.log("Weather fetch failed for advisor"); }
 
-    let hourlyBenchmark = 0.5;
-    if (temp > 30) hourlyBenchmark = 1.5;
-    else if (temp > 25) hourlyBenchmark = 1.0;
-    else if (temp < 10) hourlyBenchmark = 1.5;
+    let hourlyBenchmark = 1.0;
+    if (temp > 32) hourlyBenchmark = 2.4;
+    else if (temp > 28) hourlyBenchmark = 1.8;
+    else if (temp > 24) hourlyBenchmark = 1.4;
+    else if (temp < 10) hourlyBenchmark = 2.0;
 
     let currentPowerW = 0;
     if (deviceStates.lightSwitches.s1) currentPowerW += 10;
@@ -415,18 +416,20 @@ app.get('/api/energy-advisor', async (req, res) => {
 
     let guide = "";
     let recommendedTemp = 26;
-    if (temp > 30) recommendedTemp = 24;
+    if (temp > 30) recommendedTemp = 25;
     else if (temp > 25) recommendedTemp = 26;
     else if (temp < 10) recommendedTemp = 24;
 
     if (currentPowerW === 0) {
       guide = "현재 가동 중인 기기가 없어 에너지가 절약되고 있습니다.";
-    } else if (efficiencyPercent > 120) {
-      guide = `현재 전력 소모가 실시간 기온 대비 ${efficiencyPercent}%로 매우 높습니다. 에어컨 온도를 ${recommendedTemp}도 이상으로 높이거나 외출 시 전원을 꺼주세요.`;
+    } else if (efficiencyPercent > 180) {
+      guide = `에너지 소모가 극심합니다(${efficiencyPercent}%)! 즉시 온도를 ${recommendedTemp}도 이상으로 높여 전력 낭비를 막아주세요.`;
+    } else if (efficiencyPercent > 140) {
+      guide = `전력 소모가 상당히 높습니다. 온도를 ${recommendedTemp}도로 조절하면 효율적인 에너지 관리가 가능합니다.`;
     } else if (efficiencyPercent > 100) {
-      guide = `전력 소모가 다소 높습니다. 에어컨 설정을 ${recommendedTemp}도로 조절하면 효율적인 에너지 관리가 가능합니다.`;
+      guide = `권장 사용량을 조금 초과했습니다. 에어컨 온도를 1~2도만 높여도 효율이 훨씬 좋아집니다.`;
     } else {
-      guide = "현재 실시간 기온 대비 권장 전력량을 아주 잘 유지하고 있습니다. 훌륭한 에너지 습관입니다!";
+      guide = "실시간 기온을 고려한 최적의 에너지 효율을 보여주고 있습니다. 아주 좋은 습관입니다!";
     }
 
     res.json({
