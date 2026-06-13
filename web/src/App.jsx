@@ -269,25 +269,118 @@ const TrashResetWidget = ({ onReset }) => (
   </button>
 );
 
-const WeatherWidget = () => {
+// --- 날씨 공통 설정 및 아이콘 매핑 ---
+const getWeatherConfig = (code) => {
+  if (code === 0) return { icon: Sun, text: '맑음', color: 'text-orange-500', bg: 'bg-orange-50' };
+  if (code >= 1 && code <= 3) return { icon: Cloud, text: '구름 많음', color: 'text-gray-400', bg: 'bg-gray-50' };
+  if (code >= 45 && code <= 48) return { icon: Cloud, text: '안개', color: 'text-gray-300', bg: 'bg-gray-50' };
+  if (code >= 51 && code <= 67) return { icon: CloudRain, text: '비', color: 'text-blue-500', bg: 'bg-blue-50' };
+  if (code >= 71 && code <= 77) return { icon: CloudSnow, text: '눈', color: 'text-sky-300', bg: 'bg-sky-50' };
+  if (code >= 80 && code <= 82) return { icon: CloudRain, text: '소나기', color: 'text-indigo-500', bg: 'bg-indigo-50' };
+  if (code >= 95 && code <= 99) return { icon: CloudLightning, text: '뇌우', color: 'text-purple-500', bg: 'bg-purple-50' };
+  return { icon: Sun, text: '맑음', color: 'text-orange-500', bg: 'bg-orange-50' };
+};
+
+// --- 날씨 상세 정보 모달 ---
+const WeatherModal = ({ isOpen, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      setLoading(true);
+      const fetchDetail = async () => {
+        try {
+          const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code&timezone=Asia%2FTokyo');
+          const d = await res.json();
+          setData(d);
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
+      };
+      fetchDetail();
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const info = data ? getWeatherConfig(data.current.weather_code) : null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-black/10 backdrop-blur-md transition-all duration-300" onClick={onClose}>
+      <div className="apple-widget w-full max-w-lg rounded-[40px] p-10 relative shadow-2xl border border-white/50" onClick={e => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-8 right-8 p-2.5 rounded-full bg-gray-100/50 text-gray-400 hover:bg-gray-200 transition-all"><X size={20} /></button>
+        
+        {loading || !data ? (
+          <div className="h-64 flex items-center justify-center"><Loader2 className="animate-spin text-gray-300" size={40} /></div>
+        ) : (
+          <div className="flex flex-col items-center">
+            <div className="mb-2 text-gray-400 font-bold flex items-center gap-1.5"><MapPin size={14} /> 광주광역시</div>
+            <div className={`p-6 rounded-[32px] ${info.bg} mb-6 mt-4`}><info.icon size={64} className={info.color} strokeWidth={2} /></div>
+            <h2 className="text-5xl font-black text-gray-900 tracking-tighter mb-2">{Math.round(data.current.temperature_2m)}°</h2>
+            <p className="text-xl font-bold text-gray-500 mb-10">{info.text}</p>
+            
+            {/* 시간대별 예보 (수평 스크롤) */}
+            <div className="w-full mb-10 overflow-x-auto no-scrollbar pb-2">
+              <div className="flex gap-6 min-w-max px-2">
+                {data.hourly.time.slice(0, 24).map((time, i) => {
+                  const isNow = i === 0;
+                  const hInfo = getWeatherConfig(isNow ? data.current.weather_code : data.hourly.weather_code[i]);
+                  const hour = new Date(time).getHours();
+                  return (
+                    <div key={i} className={`flex flex-col items-center gap-3 ${isNow ? 'bg-indigo-50 px-4 py-3 rounded-2xl border border-indigo-100' : ''}`}>
+                      <span className={`text-[11px] font-black uppercase ${isNow ? 'text-indigo-500' : 'text-gray-400'}`}>{isNow ? '지금' : `${hour}시`}</span>
+                      <hInfo.icon size={22} className={hInfo.color} strokeWidth={2.5} />
+                      <span className={`text-sm font-bold ${isNow ? 'text-indigo-900' : 'text-gray-800'}`}>{Math.round(data.hourly.temperature_2m[i])}°</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 w-full gap-4 pt-6 border-t border-gray-100">
+              {[
+                { label: "체감 온도", val: `${Math.round(data.current.apparent_temperature)}°`, icon: Thermometer },
+                { label: "습도", val: `${data.current.relative_humidity_2m}%`, icon: Droplets },
+                { label: "풍속", val: `${data.current.wind_speed_10m}m/s`, icon: Wind }
+              ].map((item, i) => (
+                <div key={i} className="bg-gray-50/50 rounded-2xl p-4 flex flex-col items-center gap-2 border border-gray-100/50">
+                  <item.icon size={18} className="text-indigo-400" />
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{item.label}</span>
+                  <span className="text-lg font-bold text-gray-900">{item.val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const WeatherWidget = ({ onClick }) => {
   const [weather, setWeather] = useState(null);
   useEffect(() => {
     const fetchWeather = async () => {
       try {
-        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current_weather=true&timezone=Asia%2FTokyo');
-        const data = await res.json(); setWeather(data.current_weather);
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current=temperature_2m,weather_code&timezone=Asia%2FTokyo');
+        const data = await res.json(); setWeather(data.current);
       } catch (e) {}
     };
     fetchWeather(); setInterval(fetchWeather, 30 * 60 * 1000);
   }, []);
+  
   if (!weather) return null;
+  const config = getWeatherConfig(weather.weather_code);
+
   return (
-    <div className="apple-widget px-5 py-3 rounded-3xl flex items-center gap-4">
+    <div onClick={onClick} className="apple-widget px-5 py-3 rounded-3xl flex items-center gap-4 cursor-pointer hover:bg-white/90 transition-all active:scale-95">
       <div className="flex flex-col items-end">
         <div className="flex items-center gap-1 text-gray-400"><MapPin size={10} /><span className="text-[11px] font-bold uppercase tracking-widest">광주광역시</span></div>
-        <span className="text-2xl font-bold text-gray-900 tracking-tighter leading-none">{Math.round(weather.temperature)}°</span>
+        <span className="text-2xl font-bold text-gray-900 tracking-tighter leading-none">{Math.round(weather.temperature_2m)}°</span>
       </div>
-      <div className="p-2.5 rounded-full bg-gray-50 border border-gray-100 shadow-sm text-orange-500"><Sun size={24} /></div>
+      <div className="p-2.5 rounded-full bg-gray-50 border border-gray-100 shadow-sm">
+        <config.icon size={24} strokeWidth={2.5} className={config.color} />
+      </div>
     </div>
   );
 };
@@ -455,11 +548,98 @@ const PowerUsageCard = ({ onShowAdvisor }) => {
   );
 };
 
+// --- 날씨 맞춤 가이드 알약 위젯 ---
+const WeatherPill = ({ onApplySettings, onStop }) => {
+  const [advice, setAdvice] = useState({ msg: "날씨 정보를 불러오는 중입니다...", sub: "로딩 중", emoji: "🌡️", settings: null });
+
+  useEffect(() => {
+    const fetchWeatherAdvice = async () => {
+      try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=35.1595&longitude=126.8526&current=temperature_2m,relative_humidity_2m,weather_code&timezone=Asia%2FTokyo');
+        const data = await res.json();
+        const temp = data.current.temperature_2m;
+        const hum = data.current.relative_humidity_2m;
+        const code = data.current.weather_code;
+
+        let msg = "", sub = "", emoji = "", settings = null;
+
+        // 로직 우선순위 재조정 및 눈(Snow) 제거
+        if (temp >= 28) {
+          emoji = "🔥";
+          msg = "폭염 주의! 실내를 시원한 얼음성으로 만드세요.";
+          sub = "냉방 22°C / 터보 냉방 적용";
+          settings = { type: 'AC', mode: 'cool', temp: 22 };
+        }
+        else if (temp <= 10) {
+          emoji = "❄️";
+          msg = "한파 주의! 따뜻한 온기가 필요한 시간입니다.";
+          sub = "난방 26°C / 온기 유지 적용";
+          settings = { type: 'AC', mode: 'heat', temp: 26 };
+        }
+        else if (code >= 51) {
+          emoji = "🌧️";
+          msg = "비가 내려 습도가 높아요! 눅눅함을 잡아볼까요?";
+          sub = "냉방 24°C / 제습 모드 적용";
+          settings = { type: 'AC', mode: 'cool', temp: 24 };
+        }
+        else if (hum >= 60) {
+          emoji = "💧";
+          msg = "조금 눅눅하네요. 쾌적함을 유지해 보세요!";
+          sub = "냉방 25°C / 절전 제습 적용";
+          settings = { type: 'AC', mode: 'cool', temp: 25 };
+        }
+        else {
+          emoji = "✨";
+          msg = "완벽한 날씨! 창문을 열어 환기하기 좋은 날입니다.";
+          sub = "모든 기기 전원 OFF / 자연 환기";
+          settings = { type: 'OFF' };
+        }
+
+        setAdvice({ msg, sub, emoji, settings });
+      } catch (e) {
+        setAdvice({ msg: "날씨 연동 실패", sub: "연결 확인", emoji: "⚠️", settings: null });
+      }
+    };
+    fetchWeatherAdvice();
+    const interval = setInterval(fetchWeatherAdvice, 30 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="w-full mb-8 flex gap-3">
+      <div 
+        onClick={() => advice.settings && onApplySettings(advice.settings)}
+        className="flex-1 cursor-pointer rounded-full apple-widget px-8 py-4 flex items-center justify-between transition-all duration-500 hover:scale-[1.01] hover:bg-white/90 border-indigo-200/50 group"
+      >
+        <div className="flex items-center gap-4">
+          <span className="text-2xl group-hover:scale-125 transition-transform duration-300">{advice.emoji}</span>
+          <div className="flex flex-col">
+            <span className="text-[14px] font-bold text-gray-800">{advice.msg}</span>
+            <span className="text-[11px] font-black text-indigo-500 uppercase tracking-widest">{advice.sub}</span>
+          </div>
+        </div>
+        <div className="bg-indigo-500 text-white text-[10px] font-black px-4 py-1.5 rounded-full shadow-sm group-hover:bg-indigo-600">
+          적용하기
+        </div>
+      </div>
+      
+      <button 
+        onClick={onStop}
+        className="aspect-square h-[68px] rounded-full apple-widget flex items-center justify-center text-red-500 hover:bg-red-50 hover:text-red-600 transition-all border-red-100/50 shadow-sm"
+        title="가이드 중단"
+      >
+        <X size={24} strokeWidth={3} />
+      </button>
+    </div>
+  );
+};
+
 // --- 메인 앱 ---
 export default function App() {
   const [isLocked, setIsLocked] = useState(true), [doorLogs, setDoorLogs] = useState(["09:00 - 문이 잠겼습니다."]);
   const [chartModal, setChartModal] = useState({ isOpen: false, type: 'light' });
   const [isAdvisorOpen, setIsAdvisorOpen] = useState(false);
+  const [isWeatherOpen, setIsWeatherOpen] = useState(false);
   const [currentTrashDist, setCurrentTrashDist] = useState(30), [baseTrashDist, setBaseTrashDist] = useState(30);
   const [isLightOn, setIsLightOn] = useState(false), [lightSwitches, setLightSwitches] = useState({ s1: false, s2: false });
   const [acPower, setAcPower] = useState(false), [acMode, setAcMode] = useState('cool'), [acTemp, setAcTemp] = useState(24);
@@ -530,13 +710,36 @@ export default function App() {
       <GlobalStyles />
       <UsageChartModal isOpen={chartModal.isOpen} onClose={() => setChartModal(p => ({ ...p, isOpen: false }))} deviceType={chartModal.type} />
       <EnergyAdvisorModal isOpen={isAdvisorOpen} onClose={() => setIsAdvisorOpen(false)} />
+      <WeatherModal isOpen={isWeatherOpen} onClose={() => setIsWeatherOpen(false)} />
       
       <div className="min-h-screen py-16 px-6 flex flex-col items-center select-none bg-[#F5F7FA]">
         <div className="w-full max-w-3xl z-10">
           <header className="mb-10 flex justify-between items-end px-2">
             <div><h1 className="text-[40px] font-bold text-gray-900 leading-none mb-2">My Home</h1><p className="text-gray-500 font-semibold text-sm">스마트 홈 제어 패널</p></div>
-            <div className="flex items-center gap-4"><TrashResetWidget onReset={() => setBaseTrashDist(currentTrashDist)} /><WeatherWidget /></div>
+            <div className="flex items-center gap-4"><TrashResetWidget onReset={() => setBaseTrashDist(currentTrashDist)} /><WeatherWidget onClick={() => setIsWeatherOpen(true)} /></div>
           </header>
+
+          {/* 날씨 맞춤 가이드 알약 위젯 */}
+          <WeatherPill 
+            onApplySettings={(s) => {
+              if (s.type === 'AC') {
+                setAcPower(true);
+                setAcMode(s.mode);
+                setAcTemp(s.temp);
+                socket.emit('setAC', { command: `AC_POWER_ON_${s.mode.toUpperCase()}_${s.temp}`, rawStatus: 'ON' });
+              } else if (s.type === 'OFF') {
+                setAcPower(false);
+                socket.emit('setAC', { command: 'AC_POWER_OFF', rawStatus: 'OFF' });
+                setIsLightOn(false);
+                socket.emit('setLight', { id: 1, status: 'OFF' });
+                socket.emit('setLight', { id: 2, status: 'OFF' });
+              }
+            }}
+            onStop={() => {
+              setAcPower(false);
+              socket.emit('setAC', { command: 'AC_POWER_OFF', rawStatus: 'OFF' });
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-5 items-start">
             {/* 왼쪽: 도어락 / 오른쪽: 전등 */}
