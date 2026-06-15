@@ -169,7 +169,7 @@ async function setupSerial() {
               runAutomationLogic(temp);
             }
           } 
-          else if (data.startsWith('D:')) {
+          else if (data.startsWith('D:')) { console.log('GOT DISTANCE:', data); console.log('Distance Data:', data); io.emit('debug_serial', data); console.log('Distance Data Received:', data);
             arduino2 = port;
             io.emit('sensorData', { type: 'ultrasonic', distance: parseFloat(data.substring(2)) });
           }
@@ -186,7 +186,8 @@ const deviceStates = {
   lightSwitches: { s1: false, s2: false },
   acPower: false,
   acMode: 'cool',
-  acTemp: 24
+  acTemp: 24,
+  trashBaseDistance: 30
 };
 
 let automationSettings = { enabled: false, targetTemp: 26, lastSleepTrigger: 0 };
@@ -229,6 +230,12 @@ io.on('connection', async (socket) => {
     deviceStates.isLocked = !deviceStates.isLocked;
     toggleDoorlock();
     await saveDeviceStates();
+  });
+
+  socket.on('updateTrashBase', async (dist) => {
+    deviceStates.trashBaseDistance = dist;
+    await saveDeviceStates();
+    io.emit('initialStates', deviceStates);
   });
 
   socket.on('setLight', async (data) => {

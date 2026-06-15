@@ -609,8 +609,11 @@ const AcRemoteCard = ({ isOn, onTogglePower, mode, onToggleMode, temp, onTempCha
 const IndoorClimateCard = () => {
   const [climate, setClimate] = useState({ temp: 0, hum: 0 });
   useEffect(() => {
-    socket.on('sensorData', (d) => { if (d.type === 'dht11') setClimate({ temp: Math.round(d.temperature), hum: Math.round(d.humidity) }); });
-    return () => socket.off('sensorData');
+    const handleSensorData = (d) => { 
+      if (d.type === 'dht11') setClimate({ temp: Math.round(d.temperature), hum: Math.round(d.humidity) }); 
+    };
+    socket.on('sensorData', handleSensorData);
+    return () => socket.off('sensorData', handleSensorData);
   }, []);
   return (
     <div className="apple-widget p-6 rounded-[32px] flex flex-col justify-between h-48">
@@ -787,24 +790,32 @@ export default function App() {
         setAcPower(s.acPower);
         setAcMode(s.acMode);
         setAcTemp(s.acTemp);
+        if (s.trashBaseDistance) setBaseTrashDist(s.trashBaseDistance);
       } catch (e) { console.error("상태 로드 실패", e); }
     };
     fetchStates();
 
     // Socket으로도 초기 상태 수신 대기
-    socket.on('initialStates', (s) => {
+    const handleInitialStates = (s) => {
       setIsLocked(s.isLocked);
       setIsLightOn(s.isLightOn);
       setLightSwitches(s.lightSwitches);
       setAcPower(s.acPower);
       setAcMode(s.acMode);
       setAcTemp(s.acTemp);
-    });
+      if (s.trashBaseDistance) setBaseTrashDist(s.trashBaseDistance);
+    };
 
-    socket.on('sensorData', (d) => { if (d.type === 'ultrasonic') setCurrentTrashDist(d.distance); });
+    const handleSensorData = (d) => { 
+      if (d.type === 'ultrasonic') setCurrentTrashDist(d.distance); 
+    };
+
+    socket.on('initialStates', handleInitialStates);
+    socket.on('sensorData', handleSensorData);
+    
     return () => {
-      socket.off('initialStates');
-      socket.off('sensorData');
+      socket.off('initialStates', handleInitialStates);
+      socket.off('sensorData', handleSensorData);
     };
   }, []);
 
@@ -813,6 +824,12 @@ export default function App() {
     const time = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
     setDoorLogs(p => [`${time} - ${next ? '문이 잠겼습니다.' : '사용자가 문을 열었습니다.'}`, ...p]);
   };
+
+  const handleTrashReset = () => {
+    setBaseTrashDist(currentTrashDist);
+    socket.emit('updateTrashBase', currentTrashDist);
+  };
+
   const handleTogglePower = () => {
     const next = !isLightOn; setIsLightOn(next);
     if (!next) { socket.emit('setLight', { id: 1, status: 'OFF' }); socket.emit('setLight', { id: 2, status: 'OFF' }); }
@@ -846,12 +863,12 @@ export default function App() {
       <div className="min-h-screen py-16 px-6 flex flex-col items-center select-none bg-[#F5F7FA]">
         <div className="w-full max-w-3xl z-10">
           <header className="mb-10 flex justify-between items-end px-2">
-            <div><h1 className="text-[40px] font-bold text-gray-900 leading-none mb-2">My Home</h1><p className="text-gray-500 font-semibold text-sm">스마트 홈 제어 패널</p></div>
-            <div className="flex items-center gap-4">
-              <SmartAutomationWidget />
-              <TrashResetWidget onReset={() => setBaseTrashDist(currentTrashDist)} />
-              <WeatherWidget onClick={() => setIsWeatherOpen(true)} />
-            </div>
+          <div><h1 className="text-[40px] font-bold text-gray-900 leading-none mb-2">My Home</h1><p className="text-gray-500 font-semibold text-sm">스마트 홈 제어 패널</p></div>
+          <div className="flex items-center gap-4">
+            <SmartAutomationWidget />
+            <TrashResetWidget onReset={handleTrashReset} />
+            <WeatherWidget onClick={() => setIsWeatherOpen(true)} />
+          </div>
           </header>
 
           {/* 날씨 맞춤 가이드 알약 위젯 */}
