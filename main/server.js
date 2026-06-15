@@ -560,4 +560,23 @@ setInterval(() => {
   }
 }, 10000);
 
+app.get('/api/ai-energy-coach', async (req, res) => {
+  const pythonPath = 'python3';
+  const scriptPath = require('path').join(__dirname, 'ai_coach_model.py');
+  
+  exec(`${pythonPath} "${scriptPath}"`, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Exec error: ${error}`);
+      return res.status(500).json({ error: 'AI model execution failed' });
+    }
+    try {
+      const result = JSON.parse(stdout);
+      res.json(result);
+    } catch (e) {
+      console.error(`Parse error: ${e}, stdout: ${stdout}`);
+      res.status(500).json({ error: 'Failed to parse AI output' });
+    }
+  });
+});
+
 server.listen(3001, () => { console.log('Backend server running on port 3001'); });

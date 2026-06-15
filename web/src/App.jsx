@@ -646,6 +646,87 @@ const TrashBinCard = ({ currentDistance, baseDistance }) => {
   );
 };
 
+// --- AI 에너지 코치 카드 ---
+const AIEnergyCoachCard = ({ data, loading }) => {
+  if (loading) {
+    return (
+      <div className="col-span-2 apple-widget p-8 rounded-[40px] flex items-center justify-center h-64">
+        <Loader2 className="animate-spin text-indigo-500" size={32} />
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="col-span-2 apple-widget p-8 rounded-[40px] transition-all duration-500 hover:bg-white/80 border border-white/50 relative overflow-hidden">
+      {/* Decorative Gradient Background */}
+      <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/5 blur-[80px] rounded-full pointer-events-none" />
+      
+      <div className="flex justify-between items-start mb-8 relative z-10">
+        <div className="flex items-center gap-4">
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-200">
+            <TrendingUp size={24} strokeWidth={2.5} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-2xl font-black text-gray-900 tracking-tight">AI 에너지 코치</h3>
+              <div className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                AI
+              </div>
+            </div>
+            <p className="text-gray-400 text-[11px] font-bold uppercase tracking-[0.15em]">예측 전력 소비 분석</p>
+          </div>
+        </div>
+        <div className="flex flex-col items-end">
+          <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">AI 예측 신뢰도</div>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-indigo-400 to-indigo-600 transition-all duration-1000" 
+                style={{ width: `${data.confidence}%` }} 
+              />
+            </div>
+            <span className="text-sm font-black text-indigo-600">{data.confidence}%</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6 relative z-10">
+        <div className="p-6 rounded-[32px] bg-white/40 border border-white/60">
+          <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-3">이번 달 예상 요금</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-black text-gray-900">₩{data.currentBill.toLocaleString()}</span>
+            <span className="text-gray-400 font-bold">원</span>
+          </div>
+        </div>
+        <div className="p-6 rounded-[32px] bg-indigo-500/5 border border-indigo-500/10">
+          <p className="text-[11px] font-black text-indigo-500 uppercase tracking-widest mb-3">다음 달 예측 요금</p>
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-black text-indigo-600">₩{data.predictedNextMonthBill.toLocaleString()}</span>
+            <span className="text-indigo-400 font-bold">원</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 p-6 rounded-[32px] bg-gradient-to-r from-gray-50 to-white/10 border border-white/60 relative z-10">
+        <div className="flex items-start gap-4">
+          <div className="p-3 rounded-2xl bg-white shadow-sm text-indigo-500">
+            <Activity size={20} />
+          </div>
+          <div className="space-y-2">
+            {data.message.map((msg, i) => (
+              <p key={i} className={`text-sm font-semibold ${i === 2 ? 'text-indigo-600' : 'text-gray-600'}`}>
+                {msg}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PowerUsageCard = ({ onShowAdvisor }) => {
   const [data, setData] = useState({ currentPowerW: 0, accumulatedKWh: 0, estimatedBill: 0 });
   useEffect(() => {
@@ -777,9 +858,21 @@ export default function App() {
   const [currentTrashDist, setCurrentTrashDist] = useState(30), [baseTrashDist, setBaseTrashDist] = useState(30);
   const [isLightOn, setIsLightOn] = useState(false), [lightSwitches, setLightSwitches] = useState({ s1: false, s2: false });
   const [acPower, setAcPower] = useState(false), [acMode, setAcMode] = useState('cool'), [acTemp, setAcTemp] = useState(24);
+  const [aiData, setAiData] = useState(null), [aiLoading, setAiLoading] = useState(true);
+
+  // AI 에너지 코치 데이터 가져오기
+  const fetchAiCoach = async () => {
+    try {
+      setAiLoading(true);
+      const res = await axios.get(`http://${raspberryIp}:3001/api/ai-energy-coach`);
+      setAiData(res.data);
+    } catch (e) { console.error("AI Coach Load Failed", e); }
+    finally { setAiLoading(false); }
+  };
 
   // 초기 상태 불러오기
   useEffect(() => {
+    fetchAiCoach();
     const fetchStates = async () => {
       try {
         const res = await axios.get(`http://${raspberryIp}:3001/api/device-states`);
@@ -907,6 +1000,9 @@ export default function App() {
             
             {/* 전력 사용량 (2칸 차지, 에너지 어드바이저 버튼 포함) */}
             <PowerUsageCard onShowAdvisor={() => setIsAdvisorOpen(true)} />
+
+            {/* AI Energy Coach (2칸 차지) */}
+            <AIEnergyCoachCard data={aiData} loading={aiLoading} />
           </div>
         </div>
       </div>
