@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Lock, Unlock, Lightbulb, Wind, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2, BarChart2, X, TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Lock, Unlock, Lightbulb, Wind, Power, Sun, Cloud, CloudRain, CloudSnow, CloudLightning, Loader2, MapPin, Zap, Activity, CreditCard, Thermometer, Droplets, Trash2, BarChart2, X, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
 import io from 'socket.io-client';
 import axios from 'axios';
 
@@ -423,6 +423,33 @@ const AutomationSettingsModal = ({ isOpen, onClose, auto, onUpdate }) => {
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// --- 상단 헤더용: 아두이노 재연결 위젯 ---
+const ReconnectWidget = () => {
+  const [reconnecting, setReconnecting] = useState(false);
+  const handleReconnect = async () => {
+    setReconnecting(true);
+    try {
+      await axios.get(`http://${raspberryIp}:3001/api/reconnect`);
+      setTimeout(() => setReconnecting(false), 2000);
+    } catch (e) {
+      console.error("재연결 요청 실패", e);
+      setReconnecting(false);
+    }
+  };
+  return (
+    <div className="flex items-center justify-center mr-2">
+      <button 
+        onClick={handleReconnect}
+        disabled={reconnecting}
+        className={`p-3 rounded-2xl transition-all duration-300 ${reconnecting ? 'bg-indigo-100 text-indigo-400 animate-spin' : 'bg-white/80 text-indigo-500 hover:bg-white hover:shadow-md border border-white/50'}`}
+        title="아두이노 재연결"
+      >
+        <RefreshCw size={22} strokeWidth={2.5} />
+      </button>
     </div>
   );
 };
@@ -958,6 +985,7 @@ export default function App() {
           <header className="mb-10 flex justify-between items-end px-2">
           <div><h1 className="text-[40px] font-bold text-gray-900 leading-none mb-2">My Home</h1><p className="text-gray-500 font-semibold text-sm">스마트 홈 제어 패널</p></div>
           <div className="flex items-center gap-4">
+            <ReconnectWidget />
             <SmartAutomationWidget />
             <TrashResetWidget onReset={handleTrashReset} />
             <WeatherWidget onClick={() => setIsWeatherOpen(true)} />

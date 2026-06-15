@@ -147,38 +147,69 @@ function runAutomationLogic(temp) {
   }
 }
 
+let activePorts = [];
+
 async function setupSerial() {
+  // Close existing ports before reconnecting
+  for (const p of activePorts) {
+    try { if (p.isOpen) p.close(); } catch (e) {}
+  }
+  activePorts = [];
+  arduino1 = { write: (data) => {} };
+  arduino2 = { write: (data) => {} };
+
   try {
     const ports = await SerialPort.list();
+    console.log('Available ports:', ports.map(p => p.path));
+    
     for (const portInfo of ports) {
       const path = portInfo.path;
       if (path.includes('ttyACM') || path.includes('ttyUSB')) {
+        console.log(`Opening port: ${path}`);
         const port = new SerialPort({ path, baudRate: 9600 });
+        activePorts.push(port);
+        
         const parser = port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
         parser.on('data', (data) => {
           if (data.startsWith('T:')) {
-            arduino1 = port;
+            if (arduino1.path !== path) {
+              console.log(`Arduino 1 (Lights/DHT) identified on ${path}`);
+              arduino1 = port;
+            }
             const parts = data.split(',');
             if (parts.length === 2) {
               const temp = parseFloat(parts[0].substring(2));
               const hum = parseFloat(parts[1].substring(2));
-              lastKnownTemp = temp; // 전역 변수로 온도 저장
+              lastKnownTemp = temp;
               io.emit('sensorData', { type: 'dht11', temperature: temp, humidity: hum });
-
-              // 지능형 자동화: 쾌적 모드 (Comfort Mode)
               runAutomationLogic(temp);
             }
           } 
-          else if (data.startsWith('D:')) { console.log('GOT DISTANCE:', data); console.log('Distance Data:', data); io.emit('debug_serial', data); console.log('Distance Data Received:', data);
-            arduino2 = port;
+          else if (data.startsWith('D:')) {
+            if (arduino2.path !== path) {
+              console.log(`Arduino 2 (Distance/IR) identified on ${path}`);
+              arduino2 = port;
+            }
             io.emit('sensorData', { type: 'ultrasonic', distance: parseFloat(data.substring(2)) });
           }
         });
+
+        port.on('error', (err) => {
+          console.error(`Serial Port Error (${path}):`, err.message);
+        });
       }
     }
-  } catch (err) {}
+  } catch (err) {
+    console.error('Setup Serial Error:', err);
+  }
 }
 setupSerial();
+
+app.get('/api/reconnect', async (req, res) => {
+  console.log('Manual serial reconnection triggered...');
+  await setupSerial();
+  res.json({ success: true, message: 'Serial ports re-initialized' });
+});
 
 const deviceStates = {
   isLocked: true,
